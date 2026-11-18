@@ -71,7 +71,15 @@ read -r X Y < <(centre blank)
 c click "$X" "$Y" >/dev/null
 contains "target=_blank opens a new editor tab" "* browser 'EB Third'" c tabs
 
-section "4 Zoom and shortcuts"
+section "4 View page source"
+c rclick 200 200 >/dev/null
+until_has 10 "item 'View Page Source'" c menu
+c menu "View Page Source" >/dev/null
+contains "right-click › View Page Source opens the source in a new tab" \
+  "* browser 'view-source:127.0.0.1:$PORT/third.html'" c tabs
+contains "its address bar keeps the view-source: prefix" "address view-source:$SITE/third.html" c state
+
+section "5 Zoom and shortcuts"
 c stroke "meta MINUS" >/dev/null; sleep 1; c stroke "meta MINUS" >/dev/null
 contains "⌘- twice: 80%, label shown" "zoomLabel 80%" c state
 c stroke "meta 0" >/dev/null
@@ -80,7 +88,7 @@ c stroke "meta L" >/dev/null
 contains "⌘L focuses the address bar" "focus JBTextField" c state
 c key esc >/dev/null
 
-section "5 New Tab"
+section "6 New Tab"
 c action EditorBrowser.NewTab >/dev/null
 contains "New Browser Tab opens a blank tab" "* browser 'New Tab'" c tabs
 contains "its address bar is focused, ready to type over" "focus JBTextField" c state
@@ -98,7 +106,7 @@ n=$(browsers)
 c toolbar click >/dev/null; sleep 2
 [ "$(browsers)" -gt "$n" ] && pass "clicking it opens a blank tab" || fail "clicking the toolbar button opens a blank tab"
 
-section "6 Split and Open URL dialog"
+section "7 Split and Open URL dialog"
 c action SplitVertically >/dev/null
 contains "Split Right shows the page in two splits" "splits 2" c tabs
 c action EditorBrowser.OpenUrl >/dev/null
@@ -106,13 +114,13 @@ until_has 20 "'Open URL in Editor Tab'" c windows
 c type "127.0.0.1:$PORT/second.html" >/dev/null; c key enter >/dev/null
 contains "Tools › Open URL in Editor Tab… opens a new tab" "* browser 'EB Second'" c tabs
 
-section "7 Selected URL in code"
+section "8 Selected URL in code"
 c file "$ROOT/project/links.md" >/dev/null; sleep 2
 c select "$SITE/second.html" >/dev/null; sleep 1
 c action EditorBrowser.OpenSelection >/dev/null
 contains "right-click › Open in Editor Tab" "* browser 'EB Second'" c tabs
 
-section "8 Dev server auto-detect"
+section "9 Dev server auto-detect"
 c devserver "http://127.0.0.1:59321/" >/dev/null
 contains "a run configuration printing a localhost URL opens a tab" "127.0.0.1:59321" c tabs
 before2=$(c tabs | grep -c "browser '")
@@ -139,11 +147,12 @@ else
     || fail "restarting it reuses the tab" "$before3 → $after3"
 fi
 
-section "9 Restart"
+section "10 Restart"
 before=$(c tabs | grep -c "browser '")
 tools/sandbox/demo.sh --restart "$ROOT" >/dev/null
 ready
 contains "browser tabs reopen after a restart ($before)" "browser 'EB" c tabs
+contains "the source tab reopens as page source" "browser 'view-source:127.0.0.1:$PORT/third.html' view-source:" c tabs
 after=$(c tabs | grep -c "browser '")
 [ "$after" = "$before" ] && pass "same number of browser tabs ($after)" || fail "same number of browser tabs" "$before → $after"
 

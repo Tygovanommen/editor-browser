@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.2.1</version>
+  <version>0.2.2</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -27,6 +27,11 @@
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.2.2</p>
+    <ul>
+      <li>Right-click › <i>View Page Source</i> works: it opens the page's HTML in a new tab (it did nothing
+          before), and that tab reopens as source after a restart.</li>
+    </ul>
     <p>0.2.1</p>
     <ul>
       <li>A globe button in the main toolbar opens a New Browser Tab in one click.</li>

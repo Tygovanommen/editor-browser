@@ -10,12 +10,13 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 
 ## Status (18 Nov 2026)
 
-- Version 0.2.1, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.2.2, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
-  API use; `tools/sandbox/e2e.sh` passes 22/22 (open, title, favicon, links, back, address bar, `_blank` → tab,
-  zoom shortcuts, ⌘L, New Tab, Split Right, Open URL dialog, selection action, dev-server auto-detect, tabs
-  restored after restart, no log errors).
+  API use; `tools/sandbox/e2e.sh` passes 31/31 (open, title, favicon, links, back, address bar, `_blank` → tab,
+  View Page Source → tab, zoom shortcuts, ⌘L, New Tab, Split Right, Open URL dialog, selection action, dev-server
+  auto-detect, tabs restored after restart (a source tab as source), no log errors). The keyboard checks need the sandbox window to keep focus: if many fail
+  with `focus null`, something else took focus; rerun.
 - `EditorEmptyTextProvider`/`EditorEmptyTextSink` (`impl` package) are `@ApiStatus.Internal` with no stable
   replacement; don't reintroduce an empty-editor-placeholder hint through them, `api-check.sh` will flag it.
 - Not verified yet: building against 2026.2.3 in the release workflow (the Linux tarball's JCEF folder is matched
@@ -37,11 +38,15 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 `src/main/java/nl/netonic/browser/`
 
 - `core/Urls` — **pure JDK** (covered by `CoreTests`): `normalize` (typed text → URL; local hosts http, else
-  https), `looksLikeUrl` (for the selection action; rejects file names like `app.vue`), `label`, `shorten`.
+  https), `looksLikeUrl` (for the selection action; rejects file names like `app.vue`), `label`, `shorten`,
+  `viewSource` / `isViewSource`.
 - `BrowserFileSystem`, `BrowserFile`, `BrowserFileType` (globe icon, registered without extensions).
 - `BrowserEditorProvider` (`HIDE_DEFAULT_EDITOR`) → `BrowserEditor`: toolbar (back / forward / reload-stop),
   address bar, zoom label + buttons, open in default browser, DevTools; Chromium handlers: address / title change
-  → store + `updateFilePresentation`, loading state → button state + re-apply zoom, `onBeforePopup` → new tab.
+  → store + `updateFilePresentation`, loading state → button state + re-apply zoom, `onBeforePopup` → new tab,
+  context menu *View Page Source* → `view-source:<url>` in a new tab (CEF's own handling writes a temp file for the
+  OS to open, which does nothing in the IDE). Chromium reports a `view-source:` page's address without the prefix:
+  `sourceView` (set by the URL loaded) puts it back for the address bar and the store, so the tab reopens as source.
   Shortcuts are registered on the editor's root component (they win over the keymap inside the tab only).
 - `BrowserTabTitleProvider` — tab text = page title (40 chars) or host; tooltip = URL.
 - `BrowserTabs` — open a URL as a new tab (`OpenFileDescriptor.navigate`); `openOrReuse` / `openDevServerPort`
@@ -79,7 +84,8 @@ tools/sandbox/e2e.sh     # macOS: sandboxed PhpStorm (own config under /tmp/ebde
 - Classpath = `lib/` + the JCEF plugin's `lib/` (`plugins/*jcef*/lib`, `jcef-plugin` on macOS 2026.3).
 - Sandbox (`tools/sandbox/`): `demo.sh` starts PhpStorm with its own config/system/plugins and serves
   `/tmp/ebdemo/site` on `127.0.0.1:8765` (`EBDEMO_PORT`); `cmd.sh <command>` talks to the helper plugin
-  (`helper/Commands.java`: `open`, `tabs`, `state`, `js`, `click x y`, `stroke "meta L"`, `action <id>`, `type`,
+  (`helper/Commands.java`: `open`, `tabs`, `state`, `js`, `click x y`, `rclick x y` (Chromium's context menu),
+  `menu [label]` (list / pick an item of the open list popup), `dump`, `stroke "meta L"`, `action <id>`, `type`,
   `key`, `file`, `select`, `shot`, `quit`; `demo.sh --probe` reloads it without a restart). JCEF runs off-screen
   (OSR) there, so `shot` (Swing paint) includes the page. A script `click()` on a `target=_blank` link is blocked
   as a popup without a user gesture: use `click x y` (real mouse event) for that.

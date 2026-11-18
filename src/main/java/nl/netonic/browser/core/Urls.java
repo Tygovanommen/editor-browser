@@ -8,6 +8,7 @@ import java.util.regex.Pattern;
 /** What the user typed in the address bar → a URL, and a URL → a short tab label. Pure JDK, see CoreTests. */
 public final class Urls {
   public static final String BLANK = "about:blank";
+  public static final String VIEW_SOURCE = "view-source:";
 
   private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://.*");
   private static final Pattern NO_SLASH_SCHEME = Pattern.compile("^(about|data|file|javascript|mailto|view-source):.*",
@@ -50,6 +51,7 @@ public final class Urls {
   /** Short label for a tab before the page has a title: {@code localhost:3000}, {@code example.com}. */
   public static String label(String url) {
     if (url == null || url.isBlank() || url.equalsIgnoreCase(BLANK)) return "New Tab";
+    if (isViewSource(url)) return VIEW_SOURCE + label(url.substring(VIEW_SOURCE.length()));
     try {
       URI uri = URI.create(url);
       String host = uri.getHost();
@@ -64,6 +66,21 @@ public final class Urls {
     int cut = indexOfAny(rest, "/?#");
     String label = cut >= 0 ? rest.substring(0, cut) : rest;
     return label.isEmpty() ? url : label;
+  }
+
+  /**
+   * The address that shows {@code url}'s HTML source ({@code view-source:https://example.com/}), or null when there
+   * is no page to show the source of (blank, {@code about:blank}). A source URL stays as it is.
+   */
+  public static String viewSource(String url) {
+    if (url == null || url.isBlank() || url.strip().equalsIgnoreCase(BLANK)) return null;
+    String s = url.strip();
+    return isViewSource(s) ? s : VIEW_SOURCE + s;
+  }
+
+  /** True for a {@code view-source:} address. */
+  public static boolean isViewSource(String url) {
+    return url != null && url.regionMatches(true, 0, VIEW_SOURCE, 0, VIEW_SOURCE.length());
   }
 
   /**

@@ -141,6 +141,51 @@ public final class Commands {
         c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_CLICKED, t + 50, 0, x, y, 1, false, MouseEvent.BUTTON1));
         out.append("clicked ").append(describe(c)).append(' ').append(c.getBounds());
       }
+      // rclick <x> <y>: a real right-click at page coordinates of the selected browser tab (Chromium's context menu)
+      case "rclick" -> {
+        JBCefBrowser browser = field(selectedBrowser(), "browser", JBCefBrowser.class);
+        Component c = browser.getCefBrowser().getUIComponent();
+        String[] a = arg.split(" ");
+        int x = Integer.parseInt(a[0]), y = Integer.parseInt(a[1]);
+        long t = System.currentTimeMillis();
+        c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_MOVED, t, 0, x, y, 0, false, MouseEvent.NOBUTTON));
+        c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_PRESSED, t, InputEvent.BUTTON3_DOWN_MASK, x, y, 1, true, MouseEvent.BUTTON3));
+        c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_RELEASED, t + 50, 0, x, y, 1, false, MouseEvent.BUTTON3));
+        c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_CLICKED, t + 50, 0, x, y, 1, false, MouseEvent.BUTTON3));
+        out.append("right-clicked ").append(describe(c));
+      }
+      // menu [item label]: the items of the open list popup (Chromium's context menu is one), or picks one
+      case "menu" -> {
+        javax.swing.JList<?> list = null;
+        for (Window w : Window.getWindows()) {
+          if (!w.isShowing() || w instanceof JFrame) continue;
+          for (Component c : all(w)) if (c instanceof javax.swing.JList<?> l && l.isShowing()) list = l;
+        }
+        if (list == null) throw new IllegalStateException("no popup list showing");
+        int hit = -1;
+        for (int i = 0; i < list.getModel().getSize(); i++) {
+          // JCEF's items print as MenuItem(label=Back, commandId=100, …)
+          String item = String.valueOf(list.getModel().getElementAt(i));
+          java.util.regex.Matcher m = java.util.regex.Pattern.compile("label=([^,]*)").matcher(item);
+          String label = m.find() ? m.group(1) : item;
+          out.append("item '").append(label).append("'\n");
+          if (label.equals(arg)) hit = i;
+        }
+        if (!arg.isEmpty()) {
+          if (hit < 0) throw new IllegalArgumentException("no menu item '" + arg + "' in:\n" + out);
+          // a mouse click on the item, as the popup only takes keys through the IDE's event queue
+          java.awt.Rectangle r = list.getCellBounds(hit, hit);
+          int x = r.x + r.width / 2, y = r.y + r.height / 2;
+          long t = System.currentTimeMillis();
+          list.dispatchEvent(new MouseEvent(list, MouseEvent.MOUSE_MOVED, t, 0, x, y, 0, false, MouseEvent.NOBUTTON));
+          list.setSelectedIndex(hit);
+          list.dispatchEvent(new MouseEvent(list, MouseEvent.MOUSE_PRESSED, t, InputEvent.BUTTON1_DOWN_MASK, x, y, 1, false, MouseEvent.BUTTON1));
+          list.dispatchEvent(new MouseEvent(list, MouseEvent.MOUSE_RELEASED, t + 50, 0, x, y, 1, false, MouseEvent.BUTTON1));
+          list.dispatchEvent(new MouseEvent(list, MouseEvent.MOUSE_CLICKED, t + 50, 0, x, y, 1, false, MouseEvent.BUTTON1));
+          out.setLength(0);
+          out.append("picked '").append(arg).append('\'');
+        }
+      }
       // action <id>: runs an action with the selected editor (or focus owner) as context
       case "action" -> {
         AnAction a = ActionManager.getInstance().getAction(arg);
@@ -237,6 +282,16 @@ public final class Commands {
         g.dispose();
         ImageIO.write(img, "png", new File(arg));
         out.append("wrote ").append(arg);
+      }
+      // dump: the component tree of the popup windows that are showing
+      case "dump" -> {
+        for (Window w : Window.getWindows()) {
+          if (!w.isShowing() || w instanceof JFrame) continue;
+          out.append(w.getClass().getSimpleName()).append('\n');
+          for (Component c : all(w)) out.append("  ").append(c.getClass().getName()).append(' ').append(describe(c))
+              .append(c instanceof javax.swing.JList<?> l ? " model=" + l.getModel().getSize() + " first=" + (l.getModel().getSize() > 0 ? l.getModel().getElementAt(0) : "") : "")
+              .append('\n');
+        }
       }
       case "size" -> {
         String[] a = arg.split(" ");

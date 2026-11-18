@@ -18,6 +18,7 @@ public final class CoreTests {
     test("normalize: local hosts get http, others https", CoreTests::normalizeAddsScheme);
     test("looksLikeUrl: addresses yes, file names and text no", CoreTests::looksLikeUrl);
     test("label: host and port, www dropped", CoreTests::label);
+    test("viewSource: view-source: address of a page", CoreTests::viewSource);
     test("shorten", CoreTests::shorten);
     test("findDevServerUrl: picks the local URL out of console output", CoreTests::findDevServerUrl);
     test("hostPort: same host:port across equivalent URLs", CoreTests::hostPort);
@@ -71,6 +72,21 @@ public final class CoreTests {
     eq("backend.test", Urls.label("http://backend.test/admin"));
     eq("New Tab", Urls.label("about:blank"));
     eq("New Tab", Urls.label(null));
+    eq("view-source:localhost:3000", Urls.label("view-source:http://localhost:3000/reserveren"));
+  }
+
+  static void viewSource() {
+    eq("view-source:http://localhost:3000/a?b=1", Urls.viewSource("http://localhost:3000/a?b=1"));
+    eq("view-source:https://example.com/", Urls.viewSource(" https://example.com/ "));
+    eq("view-source:https://example.com/", Urls.viewSource("view-source:https://example.com/"));
+    eq("VIEW-SOURCE:https://example.com/", Urls.viewSource("VIEW-SOURCE:https://example.com/"));
+    eq(null, Urls.viewSource("about:blank"));
+    eq(null, Urls.viewSource(" "));
+    eq(null, Urls.viewSource(null));
+    yes(Urls.isViewSource("view-source:http://localhost:3000/"));
+    yes(Urls.isViewSource("View-Source:http://localhost:3000/"));
+    no(Urls.isViewSource("http://localhost:3000/view-source:x"));
+    no(Urls.isViewSource(null));
   }
 
   static void shorten() {

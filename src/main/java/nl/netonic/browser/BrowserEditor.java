@@ -45,6 +45,9 @@ import javax.swing.SwingUtilities;
 import nl.netonic.browser.core.Urls;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
+import org.cef.callback.CefContextMenuParams;
+import org.cef.callback.CefMenuModel;
+import org.cef.handler.CefContextMenuHandlerAdapter;
 import org.cef.handler.CefDisplayHandlerAdapter;
 import org.cef.handler.CefLifeSpanHandlerAdapter;
 import org.cef.handler.CefLoadHandlerAdapter;
@@ -79,6 +82,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private final JBLabel zoomLabel = new JBLabel();
   private final @Nullable JBCefBrowser browser;
 
+  /**
+   * Showing a page's source: Chromium reports a {@code view-source:} page's address without the prefix, which
+   * would put the plain URL in the address bar and reopen the page instead of its source after a restart.
+   */
+  private volatile boolean sourceView;
   private volatile boolean loading;
   private volatile boolean canGoBack;
   private volatile boolean canGoForward;
@@ -87,6 +95,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     this.project = project;
     this.file = file;
     String url = file.url();
+    sourceView = Urls.isViewSource(url);
     address.setText(url);
 
     if (!JBCefApp.isSupported()) {
@@ -105,9 +114,10 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       @Override
       public void onAddressChange(CefBrowser b, CefFrame frame, String newUrl) {
         if (frame != null && !frame.isMain()) return;
-        store.setUrl(file.id(), newUrl);
+        String shown = sourceView && Urls.viewSource(newUrl) != null ? Urls.viewSource(newUrl) : newUrl;
+        store.setUrl(file.id(), shown);
         onEdt(() -> {
-          if (!address.hasFocus()) address.setText(newUrl);
+          if (!address.hasFocus()) address.setText(shown);
           refreshTab();
         });
       }
@@ -147,6 +157,20 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         return true;
       }
     }, cef);
+    browser.getJBCefClient().addContextMenuHandler(new CefContextMenuHandlerAdapter() {
+      @Override
+      public boolean onContextMenuCommand(CefBrowser b, CefFrame frame, CefContextMenuParams params, int commandId,
+          int eventFlags) {
+        // Chromium's own "View page source" writes the source to a temp file for the OS to open, which does
+        // nothing in the IDE: show it in a new tab instead, as Chrome does
+        if (commandId != CefMenuModel.MenuId.MENU_ID_VIEW_SOURCE) return false;
+        String pageUrl = params.getPageUrl();
+        if (pageUrl == null || pageUrl.isBlank()) pageUrl = b.getURL();
+        String source = Urls.viewSource(pageUrl);
+        if (source != null) onEdt(() -> BrowserTabs.open(project, source, true));
+        return true;
+      }
+    }, cef);
 
     root.add(createToolbar(), BorderLayout.NORTH);
     root.add(browser.getComponent(), BorderLayout.CENTER);
@@ -164,6 +188,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
   /** Loads an already-normalized URL without touching the recent-addresses list, e.g. a detected dev server. */
   public void loadUrl(String url) {
+    sourceView = Urls.isViewSource(url);
     store.setUrl(file.id(), url);
     address.setText(url);
     if (browser != null) {

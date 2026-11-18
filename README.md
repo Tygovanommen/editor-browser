@@ -22,6 +22,8 @@ still there after a restart.
 - **Browser basics in every tab:** back, forward, reload, an address bar, zoom (handy in a narrow split: 80% shows
   the desktop layout) and Chrome DevTools.
 - **New windows become tabs:** links with `target="_blank"` and `window.open()` open as a new editor tab.
+- **Page source:** right-click the page › *View Page Source* opens the HTML in a new tab (`view-source:` addresses
+  work in the address bar too).
 - **Remembers:** tabs come back after a restart on the page you left them, with their zoom.
 - **From code:** select a URL › right-click › *Open in Editor Tab*.
 - **Looks like a tab:** the page's own favicon becomes the tab icon.
