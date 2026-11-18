@@ -1,0 +1,13 @@
+<idea-plugin>
+  <id>nl.netonic.editor-browser.sandbox</id>
+  <name>Editor Browser test helper</name>
+  <version>1</version>
+  <vendor>Netonic</vendor>
+  <description>Tests only: installed by tools/sandbox/demo.sh into a sandboxed PhpStorm.</description>
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.jcef</depends>
+  <depends>nl.netonic.editor-browser</depends>
+  <applicationListeners>
+    <listener class="nl.netonic.browser.sandbox.ShotHelper" topic="com.intellij.ide.AppLifecycleListener"/>
+  </applicationListeners>
+</idea-plugin>

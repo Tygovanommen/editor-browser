@@ -1,0 +1,54 @@
+<idea-plugin>
+  <id>nl.netonic.editor-browser</id>
+  <name>Editor Browser</name>
+  <version>0.1.0</version>
+  <vendor url="https://netonic.nl">Netonic</vendor>
+  <idea-version since-build="262"/>
+
+  <description><![CDATA[
+    <p>Websites as editor tabs, right next to your files.</p>
+    <ul>
+      <li><b>One tab per site:</b> <i>Tools › Open URL in Editor Tab…</i> opens <code>localhost:3000</code>,
+          <code>backend.test/admin</code> or any address as a normal editor tab.</li>
+      <li><b>Splits like a file:</b> right-click the tab › <i>Split Right</i> for code and site side by side.</li>
+      <li>Back, forward, reload, an address bar, zoom (handy in a narrow split) and DevTools in every tab.</li>
+      <li>Links that open a new window (<code>target="_blank"</code>) open as a new tab.</li>
+      <li>Tabs come back after a restart on the page you left them; logins are shared by all tabs.</li>
+      <li>Right-click a selected URL in code › <i>Open in Editor Tab</i>.</li>
+    </ul>
+    <p>Uses PhpStorm's own embedded Chromium (JCEF). Free and open source on
+       <a href="https://github.com/Tygovanommen/editor-browser">GitHub</a>.</p>
+  ]]></description>
+
+  <change-notes><![CDATA[
+    <p>0.1.0</p>
+    <ul>
+      <li>First release: browser tabs in the editor, address bar, back / forward / reload, zoom, DevTools,
+          new-window links as tabs, tabs restored after a restart.</li>
+    </ul>
+  ]]></change-notes>
+
+  <depends>com.intellij.modules.platform</depends>
+  <!-- the embedded Chromium; a bundled plugin since 2026.2 -->
+  <depends>com.intellij.modules.jcef</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <applicationService serviceImplementation="nl.netonic.browser.BrowserStore"/>
+    <virtualFileSystem key="editor-browser" implementationClass="nl.netonic.browser.BrowserFileSystem"/>
+    <fileType name="EditorBrowserPage" implementationClass="nl.netonic.browser.BrowserFileType" fieldName="INSTANCE"/>
+    <fileEditorProvider implementation="nl.netonic.browser.BrowserEditorProvider"/>
+    <editorTabTitleProvider implementation="nl.netonic.browser.BrowserTabTitleProvider"/>
+  </extensions>
+
+  <actions>
+    <action id="EditorBrowser.OpenUrl" class="nl.netonic.browser.actions.OpenUrlAction"
+            text="Open URL in Editor Tab…" description="Open a website as an editor tab" icon="AllIcons.General.Web">
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+      <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
+    </action>
+    <action id="EditorBrowser.OpenSelection" class="nl.netonic.browser.actions.OpenSelectionAction"
+            text="Open in Editor Tab" description="Open the selected address as a browser tab" icon="AllIcons.General.Web">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+  </actions>
+</idea-plugin>

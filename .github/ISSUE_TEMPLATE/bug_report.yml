@@ -1,0 +1,44 @@
+name: Bug report
+description: Something broke or behaved unexpectedly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Tools › Open URL in Editor Tab… › localhost:3000
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Page
+      description: The kind of page it happens on (a public URL, or "local Nuxt dev server", "Laravel app via Herd", …).
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Help › Show Log in Finder/Explorer › `idea.log`. Paste lines mentioning `nl.netonic.browser` or `jcef`.
+      render: text
+  - type: input
+    id: phpstorm
+    attributes:
+      label: PhpStorm version
+      placeholder: PhpStorm 2026.3 (PS-263.7307.215)
+    validations:
+      required: true
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 27.2 (aarch64)
