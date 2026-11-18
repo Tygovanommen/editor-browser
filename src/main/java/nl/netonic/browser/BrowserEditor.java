@@ -53,6 +53,7 @@ import org.jetbrains.annotations.Nullable;
 
 /** One browser tab: toolbar with back / forward / reload, an address bar, and the page (embedded Chromium). */
 public final class BrowserEditor extends UserDataHolderBase implements FileEditor {
+  public static final String TOOLBAR_PLACE = "EditorBrowser";
   private static final int[] ZOOM_STEPS = {25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300};
   /** The reload icon, spinning in place, shown instead of a static icon while the page loads. */
   private static final Icon RELOAD_SPINNER = reloadSpinner();
@@ -171,6 +172,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     }
   }
 
+  /** Reloads the current page, e.g. after its dev server was restarted. */
+  public void reload() {
+    withCef(CefBrowser::reload);
+  }
+
   private void refreshTab() {
     if (!project.isDisposed()) FileEditorManager.getInstance(project).updateFilePresentation(file);
   }
@@ -278,7 +284,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   }
 
   private JComponent toolbar(DefaultActionGroup group) {
-    ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("EditorBrowser", group, true);
+    ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar(TOOLBAR_PLACE, group, true);
     toolbar.setTargetComponent(root);
     toolbar.getComponent().setOpaque(false);
     toolbar.getComponent().setBorder(JBUI.Borders.empty());

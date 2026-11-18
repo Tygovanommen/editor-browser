@@ -10,7 +10,7 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 
 ## Status (18 Nov 2026)
 
-- Version 0.2.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.2.1, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
   API use; `tools/sandbox/e2e.sh` passes 22/22 (open, title, favicon, links, back, address bar, `_blank` → tab,
@@ -44,9 +44,24 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   → store + `updateFilePresentation`, loading state → button state + re-apply zoom, `onBeforePopup` → new tab.
   Shortcuts are registered on the editor's root component (they win over the keymap inside the tab only).
 - `BrowserTabTitleProvider` — tab text = page title (40 chars) or host; tooltip = URL.
-- `BrowserTabs` — open a URL as a new tab (`OpenFileDescriptor.navigate`).
-- `actions/NewTabAction` (Tools menu, editor tab right-click, browser toolbar, `⌃⌥⇧T`): opens a blank tab with the
-  address bar focused. `actions/OpenUrlAction` (Tools menu + editor tab right-click, `⌃⌥⇧U`), `actions/OpenSelectionAction`
+- `BrowserTabs` — open a URL as a new tab (`OpenFileDescriptor.navigate`); `openOrReuse` / `openDevServerPort`
+  for the automatic dev-server tabs (reuse the tab on the same host:port; loopback names count as `localhost`).
+- Dev-server auto-detect, one setting (`BrowserConfigurable`, `BrowserStore.autoOpenDevServer`), two sources:
+  `DevServerWatcher` (`ExecutionListener`: a run configuration's console prints a localhost URL) and
+  `DevServerPoller` (app service, started by the `DevServerPollerStarter` post-startup activity): every 2 s reads
+  the OS's listening TCP ports (`/proc/net/tcp*` on Linux, `netstat` on macOS / Windows — never connects, `php -S`
+  logs every connection) and opens `http://localhost:<port>/` when a port in `core/DevPorts.WATCHED` starts
+  listening, in the last focused project window. This is how `npm run dev` in the **Terminal** is covered: the
+  Terminal's own output API (`TerminalTabsManagerListener`, `TerminalOutputModel`) is `@ApiStatus.Experimental`
+  in 2026.3, so it is deliberately not used. A run configuration triggers both; the poller skips a host:port
+  auto-opened in the last 10 s.
+- `core/DevPorts` — **pure JDK**: the watched port list, parsers for BSD / Windows `netstat` and `/proc/net/tcp`,
+  and `Watch` (first look = baseline, so servers already running at IDE start don't open tabs).
+- `actions/NewTabAction` (Tools menu, editor tab right-click, main toolbar `MainToolbarRight` with a globe icon,
+  browser toolbar with a "+" (place `BrowserEditor.TOOLBAR_PLACE`), `control alt shift T` in
+  `plugin.xml` — macOS's default keymap translates that to `⌥⇧⌘T`, not `⌃⌥⇧T`): opens a blank tab with the
+  address bar focused. `actions/OpenUrlAction` (Tools menu + editor tab right-click, `control alt shift U` →
+  `⌥⇧⌘U` on macOS), `actions/OpenSelectionAction`
   (editor right-click, only visible when the selection looks like an address; strips quotes).
 - `src/main/resources/META-INF/plugin.xml` — `<depends>com.intellij.modules.jcef</depends>` is required since 2026.2
   (JCEF moved out of the platform into the bundled *Web Browser (JCEF)* plugin).

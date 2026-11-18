@@ -2,10 +2,11 @@
 # The first-run checklist of CLAUDE.md, run against a real, sandboxed PhpStorm with this plugin (macOS).
 #   tools/sandbox/e2e.sh            builds, starts a fresh sandbox (demo.sh), runs every step, quits
 #   KEEP=1 tools/sandbox/e2e.sh     leaves the sandbox running afterwards (tools/sandbox/cmd.sh to poke at it)
+#   EBDEMO_ROOT=/tmp/x EBDEMO_PORT=8766 tools/sandbox/e2e.sh   a second sandbox next to one already running
 # Prints PASS / FAIL per check and exits non-zero on any FAIL. Your own PhpStorm and settings are not touched.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-ROOT=/private/tmp/ebdemo
+ROOT="${EBDEMO_ROOT:-/private/tmp/ebdemo}"
 PORT="${EBDEMO_PORT:-8765}"
 SITE="http://127.0.0.1:$PORT"
 LOG="$ROOT/ide/log/idea.log"
@@ -85,6 +86,17 @@ contains "New Browser Tab opens a blank tab" "* browser 'New Tab'" c tabs
 contains "its address bar is focused, ready to type over" "focus JBTextField" c state
 sleep 1; c type "127.0.0.1:$PORT/second.html" >/dev/null; c key enter >/dev/null
 contains "typing an address into it loads the page" "* browser 'EB Second'" c tabs
+contains "the macOS keymap shows New Browser Tab as ⌥⇧⌘T" "shortcut ⌥⇧⌘T" c shortcut EditorBrowser.NewTab
+browsers() { c tabs | grep -c "browser '"; }
+n=$(browsers)
+c stroke "meta alt shift T" >/dev/null
+until_has 10 "* browser 'New Tab'" c tabs && [ "$(browsers)" -gt "$n" ] \
+  && pass "⌥⌘⇧T (the real keystroke) opens a blank tab" || fail "⌥⌘⇧T opens a blank tab" "$(c tabs | head -6 | tr '\n' ' ')"
+c key esc >/dev/null
+contains "the main toolbar has a globe New Browser Tab button" "button globe" c toolbar
+n=$(browsers)
+c toolbar click >/dev/null; sleep 2
+[ "$(browsers)" -gt "$n" ] && pass "clicking it opens a blank tab" || fail "clicking the toolbar button opens a blank tab"
 
 section "6 Split and Open URL dialog"
 c action SplitVertically >/dev/null
@@ -109,6 +121,23 @@ sleep 2
 after2=$(c tabs | grep -c "browser '")
 [ "$after2" = "$before2" ] && pass "restarting the dev server reuses the tab ($after2)" \
   || fail "restarting the dev server reuses the tab" "$before2 → $after2"
+# a server started outside a run configuration (the Terminal) on a watched dev-server port; note that your own
+# PhpStorm, with this plugin installed, notices it too and opens a localhost:4321 tab
+DEVPORT=4321
+if lsof -nP -iTCP:$DEVPORT -sTCP:LISTEN >/dev/null 2>&1; then
+  fail "a dev server started in the Terminal opens a tab" "port $DEVPORT is already in use on this machine"
+else
+  python3 -m http.server $DEVPORT --bind 127.0.0.1 --directory "$ROOT/site" >/dev/null 2>&1 & DEVPID=$!
+  contains "a dev server started in the Terminal (port $DEVPORT) opens a tab" "localhost:$DEVPORT" c tabs
+  before3=$(c tabs | grep -c "browser '")
+  kill $DEVPID; wait $DEVPID 2>/dev/null; sleep 4
+  python3 -m http.server $DEVPORT --bind 127.0.0.1 --directory "$ROOT/site" >/dev/null 2>&1 & DEVPID=$!
+  sleep 5
+  after3=$(c tabs | grep -c "browser '")
+  kill $DEVPID; wait $DEVPID 2>/dev/null
+  [ "$after3" = "$before3" ] && pass "restarting it reuses the tab ($after3)" \
+    || fail "restarting it reuses the tab" "$before3 → $after3"
+fi
 
 section "9 Restart"
 before=$(c tabs | grep -c "browser '")

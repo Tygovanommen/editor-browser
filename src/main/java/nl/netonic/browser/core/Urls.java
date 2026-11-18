@@ -81,7 +81,10 @@ public final class Urls {
     return null;
   }
 
-  /** {@code host:port} for matching the same address across runs, or null when {@code url} has no host. */
+  /**
+   * {@code host:port} for matching the same address across runs, or null when {@code url} has no host. Loopback
+   * names ({@code 127.0.0.1}, {@code [::1]}) count as {@code localhost}: the same dev server either way.
+   */
   public static String hostPort(String url) {
     try {
       URI uri = URI.create(url);
@@ -89,7 +92,9 @@ public final class Urls {
       if (host == null) return null;
       int port = uri.getPort();
       if (port < 0) port = "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
-      return host.toLowerCase(Locale.ROOT) + ":" + port;
+      host = host.toLowerCase(Locale.ROOT);
+      if (host.equals("127.0.0.1") || host.equals("[::1]")) host = "localhost";
+      return host + ":" + port;
     } catch (IllegalArgumentException e) {
       return null;
     }

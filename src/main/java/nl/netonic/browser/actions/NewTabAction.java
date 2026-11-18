@@ -5,13 +5,14 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import nl.netonic.browser.BrowserEditor;
 import nl.netonic.browser.BrowserTabs;
 import org.jetbrains.annotations.NotNull;
 
 /** Tools › New Browser Tab: opens a blank tab, address bar focused, no dialog in the way. */
 public final class NewTabAction extends DumbAwareAction {
   public NewTabAction() {
-    super("New Browser Tab", "Open a new, blank browser tab", AllIcons.General.Add);
+    super("New Browser Tab", "Open a new, blank browser tab", AllIcons.General.Web);
   }
 
   @Override
@@ -23,6 +24,8 @@ public final class NewTabAction extends DumbAwareAction {
   @Override
   public void update(@NotNull AnActionEvent e) {
     e.getPresentation().setEnabled(e.getProject() != null);
+    // inside a browser tab a "+" reads as "another tab"; elsewhere the globe says what it opens
+    if (BrowserEditor.TOOLBAR_PLACE.equals(e.getPlace())) e.getPresentation().setIcon(AllIcons.General.Add);
   }
 
   @Override

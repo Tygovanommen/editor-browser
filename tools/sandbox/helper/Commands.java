@@ -184,6 +184,27 @@ public final class Commands {
         q.postEvent(new KeyEvent(c, KeyEvent.KEY_RELEASED, t + 20, ks.getModifiers(), ks.getKeyCode(), KeyEvent.CHAR_UNDEFINED));
         out.append("stroke ").append(ks).append(" to ").append(describe(c));
       }
+      // toolbar [click]: the New Browser Tab button in the IDE's main toolbar (its icon and tooltip), or clicks it
+      case "toolbar" -> {
+        AnAction newTab = ActionManager.getInstance().getAction("EditorBrowser.NewTab");
+        com.intellij.openapi.actionSystem.impl.ActionButton b = null;
+        for (Component c : all(frame())) {
+          // topmost: the browser tabs' own toolbars show the same action lower down
+          if (c instanceof com.intellij.openapi.actionSystem.impl.ActionButton ab && ab.getAction() == newTab && ab.isShowing()
+              && (b == null || ab.getLocationOnScreen().y < b.getLocationOnScreen().y)) b = ab;
+        }
+        if (b == null) throw new IllegalStateException("no New Browser Tab button in the main toolbar");
+        if (arg.equals("click")) {
+          com.intellij.openapi.actionSystem.impl.ActionButton button = b;
+          later(button::click);
+          out.append("clicked");
+        } else {
+          out.append("button ").append(String.valueOf(b.getIcon()).endsWith("/web.svg)") ? "globe" : String.valueOf(b.getIcon()))
+             .append(" '").append(b.getToolTipText()).append('\'');
+        }
+      }
+      // shortcut <action id>: the action's first keyboard shortcut in the active keymap, as the IDE shows it
+      case "shortcut" -> out.append("shortcut ").append(com.intellij.openapi.keymap.KeymapUtil.getFirstKeyboardShortcutText(arg));
       // select <text>: selects the first occurrence of text in the selected text editor
       case "select" -> {
         com.intellij.openapi.editor.Editor ed = FileEditorManager.getInstance(project()).getSelectedTextEditor();

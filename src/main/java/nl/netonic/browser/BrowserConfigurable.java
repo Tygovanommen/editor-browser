@@ -12,7 +12,9 @@ import org.jetbrains.annotations.Nullable;
 /** Settings › Tools › Editor Browser: the one toggle for automatic dev-server tabs. */
 public final class BrowserConfigurable implements Configurable {
   private final JBCheckBox autoOpen = new JBCheckBox(
-      "Open a browser tab automatically when a run configuration prints a localhost URL (npm run dev, etc.)");
+      "<html>Open a browser tab automatically when a dev server starts<br>"
+          + "<small>A run configuration printing a localhost URL, or a common dev-server port (5173, 3000, 8000, "
+          + "8080, …) starting to listen, e.g. npm run dev in the Terminal</small></html>");
 
   @Override
   public @Nls(capitalization = Nls.Capitalization.Title) String getDisplayName() {

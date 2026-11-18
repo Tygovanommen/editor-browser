@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.2.0</version>
+  <version>0.2.1</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -17,18 +17,29 @@
       <li>Links that open a new window (<code>target="_blank"</code>) open as a new tab.</li>
       <li>Tabs come back after a restart on the page you left them; logins are shared by all tabs.</li>
       <li>Right-click a selected URL in code › <i>Open in Editor Tab</i>.</li>
-      <li>A run configuration printing a <code>localhost</code> URL (<code>npm run dev</code>, a PHP dev server, …)
-          opens it as a tab automatically; toggle this under Settings › Tools › Editor Browser.</li>
+      <li>Starting a dev server opens it as a tab automatically, both from a run configuration (its printed
+          <code>localhost</code> URL) and from the Terminal (<code>npm run dev</code>, <code>php -S</code>, … on a
+          common dev-server port such as 5173, 3000 or 8000); toggle this under Settings › Tools › Editor
+          Browser.</li>
     </ul>
     <p>Uses PhpStorm's own embedded Chromium (JCEF). Free and open source on
        <a href="https://github.com/Tygovanommen/editor-browser">GitHub</a>.</p>
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.2.1</p>
+    <ul>
+      <li>A globe button in the main toolbar opens a New Browser Tab in one click.</li>
+      <li>Dev servers started in the Terminal open as a tab too: a common dev-server port (5173, 3000, 8000,
+          8080, …) starting to listen is noticed within a couple of seconds.</li>
+      <li>Restarting a dev server reloads its tab; <code>127.0.0.1</code> and <code>localhost</code> count as the
+          same server.</li>
+      <li>The shortcuts are ⌥⇧⌘T / ⌥⇧⌘U on macOS (the docs said ⌃⌥⇧).</li>
+    </ul>
     <p>0.2.0</p>
     <ul>
       <li>New Browser Tab: a blank tab with the address bar focused, from the Tools menu, a tab's right-click
-          menu, a toolbar button, or ⌃⌥⇧T.</li>
+          menu, a toolbar button, or ⌥⇧⌘T (Ctrl+Alt+Shift+T on Windows / Linux).</li>
       <li>The page's own favicon becomes the tab icon.</li>
       <li>A run configuration printing a localhost URL opens it as a tab automatically (reusing the tab on a
           restart); toggle under Settings › Tools › Editor Browser.</li>
@@ -46,6 +57,8 @@
 
   <extensions defaultExtensionNs="com.intellij">
     <applicationService serviceImplementation="nl.netonic.browser.BrowserStore"/>
+    <applicationService serviceImplementation="nl.netonic.browser.DevServerPoller"/>
+    <postStartupActivity implementation="nl.netonic.browser.DevServerPollerStarter"/>
     <virtualFileSystem key="editor-browser" implementationClass="nl.netonic.browser.BrowserFileSystem"/>
     <fileType name="EditorBrowserPage" implementationClass="nl.netonic.browser.BrowserFileType" fieldName="INSTANCE"/>
     <fileEditorProvider implementation="nl.netonic.browser.BrowserEditorProvider"/>
@@ -63,6 +76,7 @@
     <action id="EditorBrowser.NewTab" class="nl.netonic.browser.actions.NewTabAction">
       <add-to-group group-id="ToolsMenu" anchor="first"/>
       <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
+      <add-to-group group-id="MainToolbarRight" anchor="first"/>
       <keyboard-shortcut keymap="$default" first-keystroke="control alt shift T"/>
     </action>
     <action id="EditorBrowser.OpenUrl" class="nl.netonic.browser.actions.OpenUrlAction"

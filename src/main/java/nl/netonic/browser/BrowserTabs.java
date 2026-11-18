@@ -4,6 +4,8 @@ import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.Project;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import nl.netonic.browser.core.Urls;
 import org.jetbrains.annotations.NotNull;
@@ -41,6 +43,7 @@ public final class BrowserTabs {
    */
   public static void openOrReuse(@NotNull Project project, @NotNull String url) {
     if (project.isDisposed()) return;
+    markAutoOpened(url);
     String existingId = BrowserStore.getInstance().findTabByHost(url);
     if (existingId == null) {
       open(project, url, true);
@@ -54,5 +57,40 @@ public final class BrowserTabs {
     if (!url.equals(previousUrl)) {
       for (FileEditor editor : openEditors) if (editor instanceof BrowserEditor be) be.loadUrl(url);
     }
+  }
+
+  /**
+   * A dev server started listening on {@code localhost:port} (seen by {@link DevServerPoller}): focuses the tab
+   * already on that host and port and reloads it on the page it was on, or opens {@code http://localhost:port/}.
+   * Does nothing when {@link #openOrReuse} just handled the same server (a run configuration printing its URL).
+   */
+  static void openDevServerPort(@NotNull Project project, int port) {
+    if (project.isDisposed()) return;
+    String url = "http://localhost:" + port + "/";
+    Long last = recentAutoOpens.get(Urls.hostPort(url));
+    if (last != null && System.currentTimeMillis() - last < RECENT_AUTO_OPEN_MS) return;
+    markAutoOpened(url);
+    String existingId = BrowserStore.getInstance().findTabByHost(url);
+    if (existingId == null) {
+      open(project, url, true);
+      return;
+    }
+    BrowserFile file = BrowserFileSystem.getInstance().file(existingId);
+    FileEditor[] openEditors = FileEditorManager.getInstance(project).getEditors(file);
+    new OpenFileDescriptor(project, file).navigate(true);
+    // a tab that was already open showed an error page or a stale build while the server was down
+    for (FileEditor editor : openEditors) if (editor instanceof BrowserEditor be) be.reload();
+  }
+
+  /** Dev-server tabs opened in the last few seconds, by host:port; UI thread only. */
+  private static final Map<String, Long> recentAutoOpens = new HashMap<>();
+  private static final long RECENT_AUTO_OPEN_MS = 10_000;
+
+  private static void markAutoOpened(String url) {
+    String hostPort = Urls.hostPort(url);
+    if (hostPort == null) return;
+    long now = System.currentTimeMillis();
+    recentAutoOpens.values().removeIf(t -> now - t > RECENT_AUTO_OPEN_MS);
+    recentAutoOpens.put(hostPort, now);
   }
 }

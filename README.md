@@ -16,8 +16,8 @@ still there after a restart.
 
 - **A tab per site:** *Tools › Open URL in Editor Tab…* (also on right-clicking an editor tab), with your recent
   addresses in the dropdown.
-- **Quick blank tab:** *Tools › New Browser Tab* (also a toolbar button and a right-click option) opens an empty
-  tab with the address bar focused, ready to type into — no dialog.
+- **Quick blank tab:** the globe button in the main toolbar (next to Run), ⌥⇧⌘T, or *Tools › New Browser Tab* (also a
+  right-click option on editor tabs) opens an empty tab with the address bar focused, ready to type into — no dialog.
 - **Splits like a file:** right-click the tab › *Split Right* for code and site side by side, or two sites at once.
 - **Browser basics in every tab:** back, forward, reload, an address bar, zoom (handy in a narrow split: 80% shows
   the desktop layout) and Chrome DevTools.
@@ -25,9 +25,11 @@ still there after a restart.
 - **Remembers:** tabs come back after a restart on the page you left them, with their zoom.
 - **From code:** select a URL › right-click › *Open in Editor Tab*.
 - **Looks like a tab:** the page's own favicon becomes the tab icon.
-- **Dev servers open themselves:** a run configuration printing a `localhost` URL (`npm run dev`, a PHP dev
-  server, …) opens it as a tab automatically, reusing the tab on a restart. Toggle under Settings › Tools ›
-  Editor Browser.
+- **Dev servers open themselves:** start one and it opens as a tab, reusing the tab on a restart. From a run
+  configuration, the `localhost` URL it prints is used. From the Terminal (or anywhere else), a common dev-server
+  port starting to listen is noticed within a couple of seconds: 1313, 3000, 3001, 3333, 4000, 4173, 4200, 4321,
+  5173, 5174, 6006, 8000, 8080, 8081. The tab opens in the project window you used last. Toggle under
+  Settings › Tools › Editor Browser.
 - Uses PhpStorm's own embedded Chromium (JCEF): nothing extra to download. Logins are shared by all tabs.
 
 ## Install
@@ -52,12 +54,12 @@ Inside a browser tab (⌘ on macOS, Ctrl elsewhere):
 | ⌘= / ⌘- / ⌘0   | Zoom in / out / reset   |
 | F12 / ⌥⌘I      | DevTools                |
 
-Global, from anywhere in the IDE (Ctrl everywhere, including macOS):
+Global, from anywhere in the IDE:
 
-| Shortcut        | Does                           |
-|-----------------|--------------------------------|
-| Ctrl⌥⇧T         | New Browser Tab (blank)        |
-| Ctrl⌥⇧U         | Open URL in Editor Tab…        |
+| macOS | Windows / Linux  | Does                    |
+|-------|------------------|-------------------------|
+| ⌥⇧⌘T  | Ctrl+Alt+Shift+T | New Browser Tab (blank) |
+| ⌥⇧⌘U  | Ctrl+Alt+Shift+U | Open URL in Editor Tab… |
 
 Reassign either one under Settings › Keymap if it clashes with something else.
 
