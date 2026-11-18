@@ -10,11 +10,14 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 
 ## Status (18 Nov 2026)
 
-- Version 0.1.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.2.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
-  API use; `tools/sandbox/e2e.sh` passes 16/16 (open, title, links, back, address bar, `_blank` → tab, zoom
-  shortcuts, ⌘L, Split Right, Open URL dialog, selection action, tabs restored after restart, no log errors).
+  API use; `tools/sandbox/e2e.sh` passes 22/22 (open, title, favicon, links, back, address bar, `_blank` → tab,
+  zoom shortcuts, ⌘L, New Tab, Split Right, Open URL dialog, selection action, dev-server auto-detect, tabs
+  restored after restart, no log errors).
+- `EditorEmptyTextProvider`/`EditorEmptyTextSink` (`impl` package) are `@ApiStatus.Internal` with no stable
+  replacement; don't reintroduce an empty-editor-placeholder hint through them, `api-check.sh` will flag it.
 - Not verified yet: building against 2026.2.3 in the release workflow (the Linux tarball's JCEF folder is matched
   as `plugins/*jcef*`); Windows / Linux at runtime.
 
@@ -42,8 +45,9 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   Shortcuts are registered on the editor's root component (they win over the keymap inside the tab only).
 - `BrowserTabTitleProvider` — tab text = page title (40 chars) or host; tooltip = URL.
 - `BrowserTabs` — open a URL as a new tab (`OpenFileDescriptor.navigate`).
-- `actions/OpenUrlAction` (Tools menu + editor tab right-click), `actions/OpenSelectionAction` (editor right-click,
-  only visible when the selection looks like an address; strips quotes).
+- `actions/NewTabAction` (Tools menu, editor tab right-click, browser toolbar, `⌃⌥⇧T`): opens a blank tab with the
+  address bar focused. `actions/OpenUrlAction` (Tools menu + editor tab right-click, `⌃⌥⇧U`), `actions/OpenSelectionAction`
+  (editor right-click, only visible when the selection looks like an address; strips quotes).
 - `src/main/resources/META-INF/plugin.xml` — `<depends>com.intellij.modules.jcef</depends>` is required since 2026.2
   (JCEF moved out of the platform into the bundled *Web Browser (JCEF)* plugin).
 

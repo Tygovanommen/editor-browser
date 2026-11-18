@@ -18,11 +18,14 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.jcef.JBCefApp;
 import com.intellij.ui.jcef.JBCefBrowser;
+import com.intellij.ui.jcef.JBCefBrowserBase;
+import com.intellij.ui.jcef.JBCefJSQuery;
 import com.intellij.util.ui.JBUI;
 import java.awt.BorderLayout;
 import java.awt.Cursor;
@@ -51,6 +54,20 @@ import org.jetbrains.annotations.Nullable;
 /** One browser tab: toolbar with back / forward / reload, an address bar, and the page (embedded Chromium). */
 public final class BrowserEditor extends UserDataHolderBase implements FileEditor {
   private static final int[] ZOOM_STEPS = {25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300};
+  /** The reload icon, spinning in place, shown instead of a static icon while the page loads. */
+  private static final Icon RELOAD_SPINNER = reloadSpinner();
+  /** Evaluates to the page's best favicon URL, or {@code ""} for a page with no real origin (e.g. about:blank). */
+  private static final String FAVICON_JS = """
+      (function () {
+        if (!/^https?:$/.test(location.protocol)) return '';
+        var links = Array.prototype.slice.call(document.querySelectorAll("link[rel~='icon']"));
+        var best = links.sort(function (a, b) {
+          var sa = parseInt((a.getAttribute('sizes') || '0').split('x')[0], 10) || 0;
+          var sb = parseInt((b.getAttribute('sizes') || '0').split('x')[0], 10) || 0;
+          return sb - sa;
+        })[0];
+        return best ? best.href : (location.origin + '/favicon.ico');
+      })()""";
 
   private final Project project;
   private final BrowserFile file;
@@ -96,10 +113,17 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
       @Override
       public void onTitleChange(CefBrowser b, String title) {
-        store.setTitle(file.id(), title);
+        // Chromium reports "about:blank" itself as the title; keep showing "New Tab" (Urls.label) instead
+        if (!Urls.BLANK.equalsIgnoreCase(title)) store.setTitle(file.id(), title);
         onEdt(BrowserEditor.this::refreshTab);
       }
     }, cef);
+    JBCefJSQuery faviconQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
+    faviconQuery.addHandler(result -> {
+      BrowserFavicons.fetch(file.id(), result, this::refreshTab);
+      return null;
+    });
+    Disposer.register(this, faviconQuery);
     browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
       @Override
       public void onLoadingStateChange(CefBrowser b, boolean isLoading, boolean back, boolean forward) {
@@ -107,6 +131,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         canGoBack = back;
         canGoForward = forward;
         if (!isLoading) applyZoom();
+      }
+
+      @Override
+      public void onLoadEnd(CefBrowser b, CefFrame frame, int httpStatusCode) {
+        if (frame != null && frame.isMain()) b.executeJavaScript(faviconQuery.inject(FAVICON_JS), b.getURL(), 0);
       }
     }, cef);
     browser.getJBCefClient().addLifeSpanHandler(new CefLifeSpanHandlerAdapter() {
@@ -129,6 +158,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     String url = Urls.normalize(input);
     if (url == null) return;
     store.addRecent(url);
+    loadUrl(url);
+  }
+
+  /** Loads an already-normalized URL without touching the recent-addresses list, e.g. a detected dev server. */
+  public void loadUrl(String url) {
     store.setUrl(file.id(), url);
     address.setText(url);
     if (browser != null) {
@@ -189,7 +223,8 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     DefaultActionGroup left = new DefaultActionGroup(
         action("Back", AllIcons.Actions.Back, () -> canGoBack, () -> withCef(CefBrowser::goBack)),
         action("Forward", AllIcons.Actions.Forward, () -> canGoForward, () -> withCef(CefBrowser::goForward)),
-        new ReloadAction());
+        new ReloadAction(),
+        ActionManager.getInstance().getAction("EditorBrowser.NewTab"));
     DefaultActionGroup right = new DefaultActionGroup(
         action("Zoom Out", AllIcons.General.ZoomOut, () -> zoom() > ZOOM_STEPS[0], () -> zoomStep(-1)),
         action("Zoom In", AllIcons.General.ZoomIn, () -> zoom() < ZOOM_STEPS[ZOOM_STEPS.length - 1], () -> zoomStep(1)),
@@ -288,6 +323,36 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     };
   }
 
+  private static Icon reloadSpinner() {
+    Icon base = AllIcons.Actions.Refresh;
+    int frameCount = 8;
+    Icon[] frames = new Icon[frameCount];
+    for (int i = 0; i < frameCount; i++) frames[i] = rotated(base, 2 * Math.PI * i / frameCount);
+    return new AnimatedIcon(100, frames);
+  }
+
+  private static Icon rotated(Icon base, double radians) {
+    return new Icon() {
+      @Override
+      public void paintIcon(java.awt.Component c, java.awt.Graphics g, int x, int y) {
+        java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+        g2.rotate(radians, x + base.getIconWidth() / 2.0, y + base.getIconHeight() / 2.0);
+        base.paintIcon(c, g2, x, y);
+        g2.dispose();
+      }
+
+      @Override
+      public int getIconWidth() {
+        return base.getIconWidth();
+      }
+
+      @Override
+      public int getIconHeight() {
+        return base.getIconHeight();
+      }
+    };
+  }
+
   private final class ReloadAction extends DumbAwareAction {
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
@@ -297,7 +362,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     @Override
     public void update(@NotNull AnActionEvent e) {
       e.getPresentation().setText(loading ? "Stop" : "Reload");
-      e.getPresentation().setIcon(loading ? AllIcons.Actions.Suspend : AllIcons.Actions.Refresh);
+      e.getPresentation().setIcon(loading ? RELOAD_SPINNER : AllIcons.Actions.Refresh);
       e.getPresentation().setEnabled(browser != null);
     }
 
@@ -316,7 +381,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
   @Override
   public @Nullable JComponent getPreferredFocusedComponent() {
-    return browser != null ? browser.getComponent() : address;
+    // a blank tab (just opened, nothing typed yet) starts with the address bar focused, ready to type into
+    if (browser == null || Urls.BLANK.equalsIgnoreCase(file.url())) return address;
+    return browser.getComponent();
   }
 
   @Override

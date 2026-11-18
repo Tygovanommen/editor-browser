@@ -2,6 +2,7 @@ package nl.netonic.browser.core;
 
 import java.net.URI;
 import java.util.Locale;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** What the user typed in the address bar → a URL, and a URL → a short tab label. Pure JDK, see CoreTests. */
@@ -12,6 +13,8 @@ public final class Urls {
   private static final Pattern NO_SLASH_SCHEME = Pattern.compile("^(about|data|file|javascript|mailto|view-source):.*",
       Pattern.CASE_INSENSITIVE);
   private static final Pattern IPV4 = Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
+  private static final Pattern ANSI_CODE = Pattern.compile("\u001B\\[[0-9;]*m");
+  private static final Pattern URL_TOKEN = Pattern.compile("https?://[^\\s\"'<>]+");
 
   private Urls() {}
 
@@ -61,6 +64,41 @@ public final class Urls {
     int cut = indexOfAny(rest, "/?#");
     String label = cut >= 0 ? rest.substring(0, cut) : rest;
     return label.isEmpty() ? url : label;
+  }
+
+  /**
+   * The first local-looking URL in a chunk of console output ({@code http://localhost:5173/},
+   * {@code http://127.0.0.1:8080}), ANSI color codes ignored, or null when there isn't one. For detecting a dev
+   * server's address in a run configuration's output.
+   */
+  public static String findDevServerUrl(String text) {
+    if (text == null) return null;
+    Matcher m = URL_TOKEN.matcher(ANSI_CODE.matcher(text).replaceAll(""));
+    while (m.find()) {
+      String candidate = trimTrailingPunctuation(m.group());
+      if (isLocalHost(host(candidate.replaceFirst("^https?://", "")))) return candidate;
+    }
+    return null;
+  }
+
+  /** {@code host:port} for matching the same address across runs, or null when {@code url} has no host. */
+  public static String hostPort(String url) {
+    try {
+      URI uri = URI.create(url);
+      String host = uri.getHost();
+      if (host == null) return null;
+      int port = uri.getPort();
+      if (port < 0) port = "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+      return host.toLowerCase(Locale.ROOT) + ":" + port;
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+  }
+
+  private static String trimTrailingPunctuation(String s) {
+    int end = s.length();
+    while (end > 0 && ".,;:!?)]}".indexOf(s.charAt(end - 1)) >= 0) end--;
+    return s.substring(0, end);
   }
 
   /** {@code text} cut to {@code max} characters with an ellipsis. */

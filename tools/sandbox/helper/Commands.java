@@ -59,6 +59,39 @@ public final class Commands {
       }
       // open <url>: a new browser tab, as Tools › Open URL in Editor Tab does after the dialog
       case "open" -> BrowserTabs.open(project(), arg, true);
+      // devserver <url>: runs a throwaway process that prints <url>, firing ExecutionManager.EXECUTION_TOPIC
+      // as a real run configuration would, to exercise DevServerWatcher end to end
+      case "devserver" -> {
+        Project project = project();
+        com.intellij.execution.configurations.GeneralCommandLine cmd =
+            new com.intellij.execution.configurations.GeneralCommandLine("sh", "-c", "echo " + arg);
+        com.intellij.execution.process.OSProcessHandler handler =
+            new com.intellij.execution.process.OSProcessHandler(cmd);
+        com.intellij.execution.runners.ExecutionEnvironment env = new com.intellij.execution.runners.ExecutionEnvironmentBuilder(
+            project, com.intellij.execution.executors.DefaultRunExecutor.getRunExecutorInstance())
+            .runProfile(new com.intellij.execution.configurations.RunProfile() {
+              @Override
+              public com.intellij.execution.configurations.RunProfileState getState(
+                  com.intellij.execution.Executor executor, com.intellij.execution.runners.ExecutionEnvironment environment) {
+                return null;
+              }
+
+              @Override
+              public String getName() {
+                return "devserver test";
+              }
+
+              @Override
+              public javax.swing.Icon getIcon() {
+                return null;
+              }
+            })
+            .build();
+        project.getMessageBus().syncPublisher(com.intellij.execution.ExecutionManager.EXECUTION_TOPIC)
+            .processStarted("Run", env, handler);
+        handler.startNotify();
+        out.append("started");
+      }
       // tabs: every open file of the project; browser tabs with title, URL and how many editors (splits) show it
       case "tabs" -> {
         FileEditorManager fem = FileEditorManager.getInstance(project());
@@ -86,7 +119,8 @@ public final class Commands {
         out.append("cef ").append(browser == null ? "none" : browser.getCefBrowser().getURL()).append('\n');
         out.append("cefZoomLevel ").append(browser == null ? "-" : browser.getCefBrowser().getZoomLevel()).append('\n');
         out.append("loading ").append(field(ed, "loading", Boolean.class)).append('\n');
-        out.append("focus ").append(describe(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()));
+        out.append("focus ").append(describe(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner())).append('\n');
+        out.append("favicon ").append(describeIcon(favicon(ed.getFile())));
       }
       // js <code>: runs JavaScript in the selected browser tab
       case "js" -> {
@@ -232,6 +266,18 @@ public final class Commands {
 
   private static String title(Window w) {
     return w instanceof JFrame f ? f.getTitle() : w instanceof JDialog d ? d.getTitle() : "";
+  }
+
+  private static javax.swing.Icon favicon(VirtualFile file) {
+    for (com.intellij.ide.FileIconProvider p : com.intellij.ide.FileIconProvider.EP_NAME.getExtensionList()) {
+      javax.swing.Icon icon = p.getIcon(file, 0, project());
+      if (icon != null) return icon;
+    }
+    return null;
+  }
+
+  private static String describeIcon(javax.swing.Icon icon) {
+    return icon == null ? "none" : icon.getIconWidth() + "x" + icon.getIconHeight();
   }
 
   private static String describe(Component c) {

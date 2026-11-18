@@ -16,12 +16,18 @@ still there after a restart.
 
 - **A tab per site:** *Tools › Open URL in Editor Tab…* (also on right-clicking an editor tab), with your recent
   addresses in the dropdown.
+- **Quick blank tab:** *Tools › New Browser Tab* (also a toolbar button and a right-click option) opens an empty
+  tab with the address bar focused, ready to type into — no dialog.
 - **Splits like a file:** right-click the tab › *Split Right* for code and site side by side, or two sites at once.
 - **Browser basics in every tab:** back, forward, reload, an address bar, zoom (handy in a narrow split: 80% shows
   the desktop layout) and Chrome DevTools.
 - **New windows become tabs:** links with `target="_blank"` and `window.open()` open as a new editor tab.
 - **Remembers:** tabs come back after a restart on the page you left them, with their zoom.
 - **From code:** select a URL › right-click › *Open in Editor Tab*.
+- **Looks like a tab:** the page's own favicon becomes the tab icon.
+- **Dev servers open themselves:** a run configuration printing a `localhost` URL (`npm run dev`, a PHP dev
+  server, …) opens it as a tab automatically, reusing the tab on a restart. Toggle under Settings › Tools ›
+  Editor Browser.
 - Uses PhpStorm's own embedded Chromium (JCEF): nothing extra to download. Logins are shared by all tabs.
 
 ## Install
@@ -46,7 +52,14 @@ Inside a browser tab (⌘ on macOS, Ctrl elsewhere):
 | ⌘= / ⌘- / ⌘0   | Zoom in / out / reset   |
 | F12 / ⌥⌘I      | DevTools                |
 
-*Open URL in Editor Tab…* has no default shortcut; give it one under Settings › Keymap.
+Global, from anywhere in the IDE (Ctrl everywhere, including macOS):
+
+| Shortcut        | Does                           |
+|-----------------|--------------------------------|
+| Ctrl⌥⇧T         | New Browser Tab (blank)        |
+| Ctrl⌥⇧U         | Open URL in Editor Tab…        |
+
+Reassign either one under Settings › Keymap if it clashes with something else.
 
 The address bar takes what you'd type in a browser: `localhost:3000` and `*.test` / `*.local` / IP addresses get
 `http://`, anything else `https://`.

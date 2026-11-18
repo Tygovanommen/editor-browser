@@ -1,5 +1,7 @@
 package nl.netonic.browser;
 
+import com.intellij.openapi.fileEditor.FileEditor;
+import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.Project;
 import java.util.UUID;
@@ -18,6 +20,11 @@ public final class BrowserTabs {
     open(project, url, true);
   }
 
+  /** Opens a new, blank tab with its address bar focused, ready to type into. */
+  public static void openBlank(@NotNull Project project) {
+    open(project, Urls.BLANK, true);
+  }
+
   /** Opens {@code url} in a new tab in the current editor split. */
   public static void open(@NotNull Project project, @NotNull String url, boolean focus) {
     if (project.isDisposed()) return;
@@ -25,5 +32,27 @@ public final class BrowserTabs {
     BrowserStore.getInstance().setUrl(id, url);
     BrowserFile file = BrowserFileSystem.getInstance().file(id);
     new OpenFileDescriptor(project, file).navigate(focus);
+  }
+
+  /**
+   * Opens {@code url} in a new tab, or, when a tab already points at the same host and port (a dev server that
+   * was restarted), focuses and updates that tab instead. Used for the automatic dev-server detection, so a tab
+   * doesn't pile up on every restart.
+   */
+  public static void openOrReuse(@NotNull Project project, @NotNull String url) {
+    if (project.isDisposed()) return;
+    String existingId = BrowserStore.getInstance().findTabByHost(url);
+    if (existingId == null) {
+      open(project, url, true);
+      return;
+    }
+    BrowserFile file = BrowserFileSystem.getInstance().file(existingId);
+    String previousUrl = file.url();
+    FileEditor[] openEditors = FileEditorManager.getInstance(project).getEditors(file);
+    BrowserStore.getInstance().setUrl(existingId, url);
+    new OpenFileDescriptor(project, file).navigate(true);
+    if (!url.equals(previousUrl)) {
+      for (FileEditor editor : openEditors) if (editor instanceof BrowserEditor be) be.loadUrl(url);
+    }
   }
 }

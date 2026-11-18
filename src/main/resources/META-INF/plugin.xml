@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -9,18 +9,30 @@
     <p>Websites as editor tabs, right next to your files.</p>
     <ul>
       <li><b>One tab per site:</b> <i>Tools › Open URL in Editor Tab…</i> opens <code>localhost:3000</code>,
-          <code>backend.test/admin</code> or any address as a normal editor tab.</li>
+          <code>backend.test/admin</code> or any address as a normal editor tab; <i>Tools › New Browser Tab</i>
+          opens a blank one to type into.</li>
       <li><b>Splits like a file:</b> right-click the tab › <i>Split Right</i> for code and site side by side.</li>
-      <li>Back, forward, reload, an address bar, zoom (handy in a narrow split) and DevTools in every tab.</li>
+      <li>Back, forward, reload, an address bar, zoom (handy in a narrow split) and DevTools in every tab; the
+          page's own favicon becomes the tab icon.</li>
       <li>Links that open a new window (<code>target="_blank"</code>) open as a new tab.</li>
       <li>Tabs come back after a restart on the page you left them; logins are shared by all tabs.</li>
       <li>Right-click a selected URL in code › <i>Open in Editor Tab</i>.</li>
+      <li>A run configuration printing a <code>localhost</code> URL (<code>npm run dev</code>, a PHP dev server, …)
+          opens it as a tab automatically; toggle this under Settings › Tools › Editor Browser.</li>
     </ul>
     <p>Uses PhpStorm's own embedded Chromium (JCEF). Free and open source on
        <a href="https://github.com/Tygovanommen/editor-browser">GitHub</a>.</p>
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.2.0</p>
+    <ul>
+      <li>New Browser Tab: a blank tab with the address bar focused, from the Tools menu, a tab's right-click
+          menu, a toolbar button, or ⌃⌥⇧T.</li>
+      <li>The page's own favicon becomes the tab icon.</li>
+      <li>A run configuration printing a localhost URL opens it as a tab automatically (reusing the tab on a
+          restart); toggle under Settings › Tools › Editor Browser.</li>
+    </ul>
     <p>0.1.0</p>
     <ul>
       <li>First release: browser tabs in the editor, address bar, back / forward / reload, zoom, DevTools,
@@ -38,13 +50,26 @@
     <fileType name="EditorBrowserPage" implementationClass="nl.netonic.browser.BrowserFileType" fieldName="INSTANCE"/>
     <fileEditorProvider implementation="nl.netonic.browser.BrowserEditorProvider"/>
     <editorTabTitleProvider implementation="nl.netonic.browser.BrowserTabTitleProvider"/>
+    <fileIconProvider implementation="nl.netonic.browser.BrowserFaviconProvider"/>
+    <applicationConfigurable parentId="tools" id="nl.netonic.browser.BrowserConfigurable" displayName="Editor Browser"
+                              instance="nl.netonic.browser.BrowserConfigurable"/>
   </extensions>
 
+  <projectListeners>
+    <listener class="nl.netonic.browser.DevServerWatcher" topic="com.intellij.execution.ExecutionListener"/>
+  </projectListeners>
+
   <actions>
+    <action id="EditorBrowser.NewTab" class="nl.netonic.browser.actions.NewTabAction">
+      <add-to-group group-id="ToolsMenu" anchor="first"/>
+      <add-to-group group-id="EditorTabPopupMenu" anchor="first"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="control alt shift T"/>
+    </action>
     <action id="EditorBrowser.OpenUrl" class="nl.netonic.browser.actions.OpenUrlAction"
             text="Open URL in Editor Tab…" description="Open a website as an editor tab" icon="AllIcons.General.Web">
       <add-to-group group-id="ToolsMenu" anchor="last"/>
       <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="control alt shift U"/>
     </action>
     <action id="EditorBrowser.OpenSelection" class="nl.netonic.browser.actions.OpenSelectionAction"
             text="Open in Editor Tab" description="Open the selected address as a browser tab" icon="AllIcons.General.Web">

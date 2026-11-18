@@ -18,6 +18,8 @@ public final class CoreTests {
     test("looksLikeUrl: addresses yes, file names and text no", CoreTests::looksLikeUrl);
     test("label: host and port, www dropped", CoreTests::label);
     test("shorten", CoreTests::shorten);
+    test("findDevServerUrl: picks the local URL out of console output", CoreTests::findDevServerUrl);
+    test("hostPort: same host:port across equivalent URLs", CoreTests::hostPort);
 
     System.out.println();
     System.out.println(passed + " passed, " + failed.size() + " failed");
@@ -72,6 +74,22 @@ public final class CoreTests {
     eq("abc", Urls.shorten(" abc ", 10));
     eq("abcdefghi…", Urls.shorten("abcdefghijklmnop", 10));
     eq("", Urls.shorten(null, 10));
+  }
+
+  static void findDevServerUrl() {
+    eq("http://localhost:5173/", Urls.findDevServerUrl("  ➔  Local:   \u001B[1mhttp://localhost:5173/\u001B[22m\n"));
+    eq("http://127.0.0.1:8080", Urls.findDevServerUrl("Project is running at: http://127.0.0.1:8080 (ready)."));
+    eq("https://backend.test/admin", Urls.findDevServerUrl("serving https://backend.test/admin now"));
+    eq(null, Urls.findDevServerUrl("Compiled successfully in 412ms"));
+    eq(null, Urls.findDevServerUrl("see https://example.com for docs"));
+    eq(null, Urls.findDevServerUrl(null));
+  }
+
+  static void hostPort() {
+    eq("localhost:3000", Urls.hostPort("http://localhost:3000/reserveren"));
+    eq("localhost:80", Urls.hostPort("http://localhost"));
+    eq("example.com:443", Urls.hostPort("https://example.com/a"));
+    eq(null, Urls.hostPort("about:blank"));
   }
 
   // --- mini framework

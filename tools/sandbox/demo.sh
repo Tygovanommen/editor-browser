@@ -90,13 +90,16 @@ mkdir -p "$ROOT/site" "$ROOT/project"
 
 cat > "$ROOT/site/index.html" <<'EOF'
 <!doctype html>
-<html><head><title>EB Home</title></head>
+<html><head><title>EB Home</title><link rel="icon" href="/favicon.png"></head>
 <body>
   <h1>Editor Browser test page</h1>
   <p><a id="next" href="/second.html">Second page (same tab)</a></p>
   <p><a id="blank" href="/third.html" target="_blank">Third page (target=_blank: new tab)</a></p>
 </body></html>
 EOF
+# a 1x1 PNG, just enough for BrowserFavicons to decode and scale into a tab icon
+echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" \
+  | base64 -D > "$ROOT/site/favicon.png"
 cat > "$ROOT/site/second.html" <<'EOF'
 <!doctype html>
 <html><head><title>EB Second</title></head><body><h1>Second</h1><a href="/">home</a></body></html>

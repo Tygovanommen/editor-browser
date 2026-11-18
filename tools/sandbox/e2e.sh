@@ -53,6 +53,7 @@ c open "$SITE/" >/dev/null
 contains "tab shows the page title" "* browser 'EB Home'" c tabs
 contains "address bar shows the URL" "address $SITE/" c state
 contains "Chromium loaded it" "cef $SITE/" c state
+contains "the page's favicon becomes the tab icon" "favicon 16x16" c state
 
 section "2 Navigation"
 c js "document.getElementById('next').click()" >/dev/null
@@ -78,7 +79,14 @@ c stroke "meta L" >/dev/null
 contains "⌘L focuses the address bar" "focus JBTextField" c state
 c key esc >/dev/null
 
-section "5 Split and Open URL dialog"
+section "5 New Tab"
+c action EditorBrowser.NewTab >/dev/null
+contains "New Browser Tab opens a blank tab" "* browser 'New Tab'" c tabs
+contains "its address bar is focused, ready to type over" "focus JBTextField" c state
+sleep 1; c type "127.0.0.1:$PORT/second.html" >/dev/null; c key enter >/dev/null
+contains "typing an address into it loads the page" "* browser 'EB Second'" c tabs
+
+section "6 Split and Open URL dialog"
 c action SplitVertically >/dev/null
 contains "Split Right shows the page in two splits" "splits 2" c tabs
 c action EditorBrowser.OpenUrl >/dev/null
@@ -86,13 +94,23 @@ until_has 20 "'Open URL in Editor Tab'" c windows
 c type "127.0.0.1:$PORT/second.html" >/dev/null; c key enter >/dev/null
 contains "Tools › Open URL in Editor Tab… opens a new tab" "* browser 'EB Second'" c tabs
 
-section "6 Selected URL in code"
+section "7 Selected URL in code"
 c file "$ROOT/project/links.md" >/dev/null; sleep 2
 c select "$SITE/second.html" >/dev/null; sleep 1
 c action EditorBrowser.OpenSelection >/dev/null
 contains "right-click › Open in Editor Tab" "* browser 'EB Second'" c tabs
 
-section "7 Restart"
+section "8 Dev server auto-detect"
+c devserver "http://127.0.0.1:59321/" >/dev/null
+contains "a run configuration printing a localhost URL opens a tab" "127.0.0.1:59321" c tabs
+before2=$(c tabs | grep -c "browser '")
+c devserver "http://127.0.0.1:59321/" >/dev/null
+sleep 2
+after2=$(c tabs | grep -c "browser '")
+[ "$after2" = "$before2" ] && pass "restarting the dev server reuses the tab ($after2)" \
+  || fail "restarting the dev server reuses the tab" "$before2 → $after2"
+
+section "9 Restart"
 before=$(c tabs | grep -c "browser '")
 tools/sandbox/demo.sh --restart "$ROOT" >/dev/null
 ready

@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import nl.netonic.browser.core.Urls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,6 +29,7 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     public Map<String, String> titles = new LinkedHashMap<>();
     public Map<String, String> zoom = new LinkedHashMap<>();
     public List<String> recent = new ArrayList<>();
+    public boolean autoOpenDevServer = true;
   }
 
   private Data data = new Data();
@@ -92,6 +94,28 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     data.recent.remove(url);
     data.recent.add(0, url);
     while (data.recent.size() > MAX_RECENT) data.recent.remove(data.recent.size() - 1);
+  }
+
+  public synchronized boolean isAutoOpenDevServer() {
+    return data.autoOpenDevServer;
+  }
+
+  public synchronized void setAutoOpenDevServer(boolean value) {
+    data.autoOpenDevServer = value;
+  }
+
+  /**
+   * The id of the most recently active tab already pointed at the same host and port as {@code url} (e.g. a
+   * dev server that was stopped and started again), or null when there isn't one.
+   */
+  public synchronized @Nullable String findTabByHost(String url) {
+    String hostPort = Urls.hostPort(url);
+    if (hostPort == null) return null;
+    String found = null;
+    for (Map.Entry<String, String> entry : data.urls.entrySet()) {
+      if (hostPort.equals(Urls.hostPort(entry.getValue()))) found = entry.getKey();
+    }
+    return found;
   }
 
   private void prune() {
