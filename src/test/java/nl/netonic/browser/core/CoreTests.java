@@ -19,11 +19,17 @@ public final class CoreTests {
     test("looksLikeUrl: addresses yes, file names and text no", CoreTests::looksLikeUrl);
     test("label: host and port, www dropped", CoreTests::label);
     test("viewSource: view-source: address of a page", CoreTests::viewSource);
+    test("local files: HTML file names, file: URL there and back, label", CoreTests::localFiles);
     test("shorten", CoreTests::shorten);
     test("findDevServerUrl: picks the local URL out of console output", CoreTests::findDevServerUrl);
     test("hostPort: same host:port across equivalent URLs", CoreTests::hostPort);
     test("DevPorts: listening ports from netstat / proc output", CoreTests::devPortsParse);
     test("DevPorts.Watch: reports watched ports that started since the last look", CoreTests::devPortsWatch);
+    test("DeviceWidths: page area width per preset, zoom and tab width", CoreTests::deviceWidths);
+    test("isLocal: local http(s) pages, also as source", CoreTests::isLocal);
+    test("LiveReload: which saves reload a page", CoreTests::liveReload);
+    test("ConsoleLog: count, last messages, file names", CoreTests::consoleLog);
+    test("Js: string literals and the match-count script", CoreTests::js);
 
     System.out.println();
     System.out.println(passed + " passed, " + failed.size() + " failed");
@@ -73,6 +79,28 @@ public final class CoreTests {
     eq("New Tab", Urls.label("about:blank"));
     eq("New Tab", Urls.label(null));
     eq("view-source:localhost:3000", Urls.label("view-source:http://localhost:3000/reserveren"));
+  }
+
+  static void localFiles() {
+    yes(Urls.isHtmlFile("index.html"));
+    yes(Urls.isHtmlFile("Page.HTM"));
+    yes(Urls.isHtmlFile("doc.xhtml"));
+    no(Urls.isHtmlFile("base.html.twig"));
+    no(Urls.isHtmlFile("app.vue"));
+    no(Urls.isHtmlFile("html"));
+    no(Urls.isHtmlFile(null));
+    java.nio.file.Path page = java.nio.file.Path.of("/tmp/my site/café/index.html");
+    String url = Urls.fileUrl(page);
+    eq("file:///tmp/my%20site/caf%C3%A9/index.html", url);
+    eq(page, Urls.localPath(url));
+    eq(page, Urls.localPath(url + "?v=2#top"));
+    eq(page, Urls.localPath("FILE:///tmp/my%20site/./caf%C3%A9/index.html"));
+    eq(null, Urls.localPath("http://localhost/index.html"));
+    eq(null, Urls.localPath("view-source:file:///tmp/index.html"));
+    eq(null, Urls.localPath("file:relative"));
+    eq(null, Urls.localPath(null));
+    eq("index.html", Urls.label(url + "#top"));
+    eq("view-source:index.html", Urls.label("view-source:" + url));
   }
 
   static void viewSource() {
@@ -156,6 +184,88 @@ public final class CoreTests {
     eq(Set.of(5173), watch.update(Set.of(5173, 22))); // restarted
     watch.reset();
     eq(Set.of(), watch.update(Set.of(5173, 3000, 8080)));
+  }
+
+  static void isLocal() {
+    yes(Urls.isLocal("http://localhost:3000/"));
+    yes(Urls.isLocal("http://backend.test/admin"));
+    yes(Urls.isLocal("https://app.localhost"));
+    yes(Urls.isLocal("http://127.0.0.1:8765/second.html"));
+    yes(Urls.isLocal("HTTP://[::1]:5173/"));
+    yes(Urls.isLocal("view-source:http://127.0.0.1:8765/"));
+    yes(Urls.isLocal("http://user:pw@printer.local/"));
+    no(Urls.isLocal("https://example.com/"));
+    no(Urls.isLocal("view-source:https://example.com/"));
+    no(Urls.isLocal("https://localhost.example.com/"));
+    no(Urls.isLocal("about:blank"));
+    no(Urls.isLocal("file:///tmp/x.html"));
+    no(Urls.isLocal("http://"));
+    no(Urls.isLocal(null));
+  }
+
+  static void liveReload() {
+    yes(LiveReload.handledByDevServer("app.ts"));
+    yes(LiveReload.handledByDevServer("Site.SCSS"));
+    yes(LiveReload.handledByDevServer("App.vue"));
+    no(LiveReload.handledByDevServer("UserController.php"));
+    no(LiveReload.handledByDevServer("base.html.twig"));
+    no(LiveReload.handledByDevServer("welcome.blade.php"));
+    no(LiveReload.handledByDevServer(".env"));
+    no(LiveReload.handledByDevServer(null));
+    yes(LiveReload.shouldReload(List.of("app.ts"), false));
+    yes(LiveReload.shouldReload(List.of("UserController.php"), true));
+    yes(LiveReload.shouldReload(List.of("app.ts", "base.html.twig"), true));
+    no(LiveReload.shouldReload(List.of("app.ts", "site.css"), true));
+    no(LiveReload.shouldReload(List.of(), false));
+    java.nio.file.Path page = java.nio.file.Path.of("/work/site/index.html");
+    yes(LiveReload.changesFilePage(page, List.of(java.nio.file.Path.of("/work/site/index.html"))));
+    yes(LiveReload.changesFilePage(page, List.of(java.nio.file.Path.of("/work/site/css/app.css"))));
+    no(LiveReload.changesFilePage(page, List.of(java.nio.file.Path.of("/work/other/index.html"))));
+    no(LiveReload.changesFilePage(page, List.of(java.nio.file.Path.of("/work/site-2/a.css"))));
+    no(LiveReload.changesFilePage(null, List.of()));
+  }
+
+  static void consoleLog() {
+    ConsoleLog log = new ConsoleLog();
+    eq(0, log.count());
+    log.add("Uncaught ReferenceError: x is not defined", "http://localhost:5173/src/app.js?v=3", 12);
+    log.add("Failed to load resource:\n  404", "http://localhost:5173/", 0);
+    eq(2, log.count());
+    eq(List.of("Uncaught ReferenceError: x is not defined (app.js:12)", "Failed to load resource: 404"), log.recent());
+    for (int i = 0; i < 10; i++) log.add("e" + i, "", 0);
+    eq(12, log.count());
+    eq(List.of("e5", "e6", "e7", "e8", "e9"), log.recent());
+    log.clear();
+    eq(0, log.count());
+    eq(List.of(), log.recent());
+    eq("error.html", ConsoleLog.fileName("http://127.0.0.1:8765/error.html#x"));
+    eq("", ConsoleLog.fileName("http://localhost:3000"));
+    eq("", ConsoleLog.fileName(null));
+  }
+
+  static void js() {
+    eq("\"a\\\"b\\\\c\\n\\u003c/script>\"", Js.string("a\"b\\c\n</script>"));
+    eq("\"\\u2028\\u0001\"", Js.string("\u2028\u0001"));
+    eq("\"\"", Js.string(null));
+    String script = Js.countMatches("It's", 7);
+    yes(script.contains("return '7:' + c;"));
+    yes(script.endsWith("(\"It's\")"));
+  }
+
+  static void deviceWidths() {
+    eq(1000, DeviceWidths.frameWidth(DeviceWidths.FULL, 100, 1000));
+    eq(1000, DeviceWidths.frameWidth(DeviceWidths.FULL, 50, 1000));
+    eq(390, DeviceWidths.frameWidth(390, 100, 1000));
+    eq(195, DeviceWidths.frameWidth(390, 50, 1000));
+    eq(312, DeviceWidths.frameWidth(390, 80, 1000));
+    eq(800, DeviceWidths.frameWidth(1280, 100, 800)); // a narrow split: never wider than the tab
+    eq(0, DeviceWidths.frameWidth(390, 100, 0));
+    eq(0, DeviceWidths.frameWidth(DeviceWidths.FULL, 100, -5));
+    eq(768, DeviceWidths.parse("768"));
+    eq(DeviceWidths.FULL, DeviceWidths.parse(null));
+    eq(DeviceWidths.FULL, DeviceWidths.parse("abc"));
+    eq(DeviceWidths.FULL, DeviceWidths.parse("-390"));
+    eq("Phone (390 px)", DeviceWidths.PRESETS.get(0).text());
   }
 
   // --- mini framework

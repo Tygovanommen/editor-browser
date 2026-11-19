@@ -7,8 +7,8 @@
 -->
 <plugins>
   <plugin id="nl.netonic.editor-browser"
-          url="https://github.com/Tygovanommen/editor-browser/releases/download/v0.2.2/editor-browser-0.2.2.zip"
-          version="0.2.2">
+          url="https://github.com/Tygovanommen/editor-browser/releases/download/v0.3.0/editor-browser-0.3.0.zip"
+          version="0.3.0">
     <idea-version since-build="262"/>
     <name>Editor Browser</name>
     <vendor url="https://netonic.nl">Netonic</vendor>

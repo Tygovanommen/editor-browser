@@ -9,12 +9,13 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import nl.netonic.browser.core.DeviceWidths;
 import nl.netonic.browser.core.Urls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Per tab id: the current URL, page title and zoom; plus the recently typed addresses. Saved in
+ * Per tab id: the current URL, page title, zoom and device width; plus the recently typed addresses. Saved in
  * {@code editorBrowser.xml}, so tabs PhpStorm reopens after a restart load their last page.
  * Entries are not removed when a tab closes (closing a project closes its tabs too); the oldest are dropped past
  * {@link #MAX_TABS}.
@@ -28,8 +29,11 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     public Map<String, String> urls = new LinkedHashMap<>();
     public Map<String, String> titles = new LinkedHashMap<>();
     public Map<String, String> zoom = new LinkedHashMap<>();
+    /** Device width preset in CSS px; absent = full width. */
+    public Map<String, String> widths = new LinkedHashMap<>();
     public List<String> recent = new ArrayList<>();
     public boolean autoOpenDevServer = true;
+    public boolean reloadOnSave = true;
   }
 
   private Data data = new Data();
@@ -86,6 +90,16 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     else data.zoom.put(id, Integer.toString(percent));
   }
 
+  /** Device width in CSS px, {@link DeviceWidths#FULL} (0) when the page fills the tab. */
+  public synchronized int width(String id) {
+    return DeviceWidths.parse(data.widths.get(id));
+  }
+
+  public synchronized void setWidth(String id, int cssWidth) {
+    if (cssWidth <= 0) data.widths.remove(id);
+    else data.widths.put(id, Integer.toString(cssWidth));
+  }
+
   public synchronized List<String> recent() {
     return new ArrayList<>(data.recent);
   }
@@ -104,6 +118,15 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     data.autoOpenDevServer = value;
   }
 
+  /** Whether saving a project file reloads the tabs showing a local page ({@link ReloadOnSave}). */
+  public synchronized boolean isReloadOnSave() {
+    return data.reloadOnSave;
+  }
+
+  public synchronized void setReloadOnSave(boolean value) {
+    data.reloadOnSave = value;
+  }
+
   /**
    * The id of the most recently active tab already pointed at the same host and port as {@code url} (e.g. a
    * dev server that was stopped and started again), or null when there isn't one.
@@ -118,6 +141,20 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     return found;
   }
 
+  /**
+   * The id of the most recently active tab showing the same local file as the {@code file:} URL {@code url}
+   * (query and fragment ignored), or null when there isn't one.
+   */
+  public synchronized @Nullable String findTabByFile(String url) {
+    java.nio.file.Path path = Urls.localPath(url);
+    if (path == null) return null;
+    String found = null;
+    for (Map.Entry<String, String> entry : data.urls.entrySet()) {
+      if (path.equals(Urls.localPath(entry.getValue()))) found = entry.getKey();
+    }
+    return found;
+  }
+
   private void prune() {
     Iterator<String> it = data.urls.keySet().iterator();
     while (data.urls.size() > MAX_TABS && it.hasNext()) {
@@ -125,6 +162,7 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
       it.remove();
       data.titles.remove(id);
       data.zoom.remove(id);
+      data.widths.remove(id);
     }
   }
 }

@@ -21,11 +21,28 @@ still there after a restart.
 - **Splits like a file:** right-click the tab › *Split Right* for code and site side by side, or two sites at once.
 - **Browser basics in every tab:** back, forward, reload, an address bar, zoom (handy in a narrow split: 80% shows
   the desktop layout) and Chrome DevTools.
+- **Device widths:** the phone/tablet button next to zoom lays the page out at 390 (phone), 768 (tablet) or 1280 px
+  (laptop) wide, centred in the tab, so you see its responsive layout without resizing anything. The width is in
+  CSS px, so it scales with the zoom; in a tab narrower than that, the page gets the tab's width. Click the
+  "390 px" label (or pick *Full Width*) to go back.
+- **Reloads on save:** save a file in the project and the tabs on a local page (`localhost`, an IP, `*.test`,
+  `*.local`) reload; a tab in the background reloads when you switch to it. Pages whose dev server already reloads
+  them (Vite, webpack HMR, LiveReload, Browsersync) are left to it for front-end files (JS, CSS, Vue, …) and only
+  reload for server-side ones (PHP, Twig, Blade, …). Only saves in the IDE count. Toggle under
+  Settings › Tools › Editor Browser.
+- **Find in page:** ⌘F opens a find bar with the number of matches; Enter / ⇧Enter (or ⌘G / ⇧⌘G) step through
+  them, Esc closes it.
+- **Console errors at a glance:** a red badge in the tab's toolbar counts the page's JavaScript console errors;
+  hover for the last messages, click to open DevTools.
 - **New windows become tabs:** links with `target="_blank"` and `window.open()` open as a new editor tab.
 - **Page source:** right-click the page › *View Page Source* opens the HTML in a new tab (`view-source:` addresses
   work in the address bar too).
-- **Remembers:** tabs come back after a restart on the page you left them, with their zoom.
+- **Remembers:** tabs come back after a restart on the page you left them, with their zoom and device width.
 - **From code:** select a URL › right-click › *Open in Editor Tab*.
+- **HTML files of the project:** right-click an `.html` file (in the project view, the editor or on its tab) ›
+  *Open In › Browser Tab*, or click the globe in the HTML editor's floating browser bar. The file is shown from disk
+  (`file://`), so relative CSS, scripts and images load. Running it again focuses and reloads that tab, and saving
+  the page or a file in its folder reloads it.
 - **Looks like a tab:** the page's own favicon becomes the tab icon.
 - **Dev servers open themselves:** start one and it opens as a tab, reusing the tab on a restart. From a run
   configuration, the `localhost` URL it prints is used. From the Terminal (or anywhere else), a common dev-server
@@ -55,6 +72,8 @@ Inside a browser tab (⌘ on macOS, Ctrl elsewhere):
 | ⌘[ / ⌘]        | Back / forward          |
 | ⌘= / ⌘- / ⌘0   | Zoom in / out / reset   |
 | F12 / ⌥⌘I      | DevTools                |
+| ⌘F             | Find in page            |
+| ⌘G / ⇧⌘G, F3   | Next / previous match   |
 
 Global, from anywhere in the IDE:
 

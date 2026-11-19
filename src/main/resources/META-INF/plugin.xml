@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.2.2</version>
+  <version>0.3.0</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -14,9 +14,14 @@
       <li><b>Splits like a file:</b> right-click the tab › <i>Split Right</i> for code and site side by side.</li>
       <li>Back, forward, reload, an address bar, zoom (handy in a narrow split) and DevTools in every tab; the
           page's own favicon becomes the tab icon.</li>
+      <li>Device widths: see the page at a phone, tablet or laptop width, centred in the tab.</li>
+      <li>Saving a project file reloads the tabs on a local page (<code>localhost</code>, <code>*.test</code>, …);
+          pages with their own hot reload (Vite, webpack) are left to it for front-end files.</li>
+      <li>Find in page (⌘F), and a toolbar badge counting the page's console errors.</li>
       <li>Links that open a new window (<code>target="_blank"</code>) open as a new tab.</li>
       <li>Tabs come back after a restart on the page you left them; logins are shared by all tabs.</li>
       <li>Right-click a selected URL in code › <i>Open in Editor Tab</i>.</li>
+      <li>Right-click an HTML file › <i>Open In › Browser Tab</i> shows it as a page, straight from disk.</li>
       <li>Starting a dev server opens it as a tab automatically, both from a run configuration (its printed
           <code>localhost</code> URL) and from the Terminal (<code>npm run dev</code>, <code>php -S</code>, … on a
           common dev-server port such as 5173, 3000 or 8000); toggle this under Settings › Tools › Editor
@@ -27,6 +32,21 @@
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.3.0</p>
+    <ul>
+      <li>Device widths: a toolbar button lays the page out at a phone (390 px), tablet (768 px) or laptop
+          (1280 px) width, centred in the tab, to check its responsive layout; remembered per tab.</li>
+      <li>Open In › Browser Tab: an HTML file of the project as a page (from the project view, the editor, its tab
+          or the HTML editor's floating browser bar); running it again reuses the tab.</li>
+      <li>Reload on save: saving a project file reloads the tabs on a local page (a tab in the background when you
+          switch to it). Pages whose dev server reloads them itself (Vite, webpack HMR, LiveReload, Browsersync)
+          only reload for server-side files such as PHP, Twig or Blade. Toggle under Settings › Tools › Editor
+          Browser.</li>
+      <li>Find in page: ⌘F (Ctrl+F) opens a find bar with the number of matches; Enter, ⌘G / ⇧⌘G or F3 step
+          through them.</li>
+      <li>A red badge in the toolbar counts the page's console errors; hover for the messages, click for
+          DevTools.</li>
+    </ul>
     <p>0.2.2</p>
     <ul>
       <li>Right-click › <i>View Page Source</i> works: it opens the page's HTML in a new tab (it did nothing
@@ -73,6 +93,10 @@
                               instance="nl.netonic.browser.BrowserConfigurable"/>
   </extensions>
 
+  <applicationListeners>
+    <listener class="nl.netonic.browser.ReloadOnSave" topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
+  </applicationListeners>
+
   <projectListeners>
     <listener class="nl.netonic.browser.DevServerWatcher" topic="com.intellij.execution.ExecutionListener"/>
   </projectListeners>
@@ -89,6 +113,14 @@
       <add-to-group group-id="ToolsMenu" anchor="last"/>
       <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
       <keyboard-shortcut keymap="$default" first-keystroke="control alt shift U"/>
+    </action>
+    <action id="EditorBrowser.OpenFile" class="nl.netonic.browser.actions.OpenFileAction"
+            text="Open in Browser Tab" description="Show this HTML file as a page in a browser tab"
+            icon="AllIcons.General.Web">
+      <!-- "Open In" in the project view, editor and editor tab right-click menus, after "Browser" -->
+      <add-to-group group-id="RevealGroup" anchor="last"/>
+      <!-- the floating bar with browser icons in the corner of an HTML editor -->
+      <add-to-group group-id="OpenInBrowserEditorContextBarGroup" anchor="last"/>
     </action>
     <action id="EditorBrowser.OpenSelection" class="nl.netonic.browser.actions.OpenSelectionAction"
             text="Open in Editor Tab" description="Open the selected address as a browser tab" icon="AllIcons.General.Web">

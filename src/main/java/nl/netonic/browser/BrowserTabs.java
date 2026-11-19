@@ -37,6 +37,24 @@ public final class BrowserTabs {
   }
 
   /**
+   * Opens a local file ({@code file:} URL, e.g. an HTML file from the project) as a page. A tab already showing
+   * that file is focused and reloaded instead, so running the action again after an edit shows the edit.
+   */
+  public static void openFile(@NotNull Project project, @NotNull String fileUrl) {
+    if (project.isDisposed()) return;
+    String existingId = BrowserStore.getInstance().findTabByFile(fileUrl);
+    if (existingId == null) {
+      open(project, fileUrl, true);
+      return;
+    }
+    BrowserFile file = BrowserFileSystem.getInstance().file(existingId);
+    FileEditor[] openEditors = FileEditorManager.getInstance(project).getEditors(file);
+    new OpenFileDescriptor(project, file).navigate(true);
+    // a tab that was closed loads its stored page when it opens again; an open one shows the old version
+    for (FileEditor editor : openEditors) if (editor instanceof BrowserEditor be) be.reload();
+  }
+
+  /**
    * Opens {@code url} in a new tab, or, when a tab already points at the same host and port (a dev server that
    * was restarted), focuses and updates that tab instead. Used for the automatic dev-server detection, so a tab
    * doesn't pile up on every restart.

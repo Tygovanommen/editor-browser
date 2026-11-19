@@ -1,6 +1,7 @@
 package nl.netonic.browser.core;
 
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -52,6 +53,8 @@ public final class Urls {
   public static String label(String url) {
     if (url == null || url.isBlank() || url.equalsIgnoreCase(BLANK)) return "New Tab";
     if (isViewSource(url)) return VIEW_SOURCE + label(url.substring(VIEW_SOURCE.length()));
+    Path local = localPath(url);
+    if (local != null && local.getFileName() != null) return local.getFileName().toString();
     try {
       URI uri = URI.create(url);
       String host = uri.getHost();
@@ -81,6 +84,47 @@ public final class Urls {
   /** True for a {@code view-source:} address. */
   public static boolean isViewSource(String url) {
     return url != null && url.regionMatches(true, 0, VIEW_SOURCE, 0, VIEW_SOURCE.length());
+  }
+
+  /**
+   * True for an http(s) page on a local host (localhost, an IP, {@code .test}, {@code .local}, {@code .localhost}),
+   * also shown as source: the pages a saved project file can change.
+   */
+  public static boolean isLocal(String url) {
+    if (url == null) return false;
+    String s = url.strip();
+    if (isViewSource(s)) s = s.substring(VIEW_SOURCE.length());
+    if (!s.regionMatches(true, 0, "http://", 0, 7) && !s.regionMatches(true, 0, "https://", 0, 8)) return false;
+    String host = host(s.substring(s.indexOf("://") + 3));
+    return !host.isEmpty() && isLocalHost(host);
+  }
+
+  /** True for a file Chromium shows as a page: {@code index.html}, {@code page.htm}, {@code doc.xhtml}. */
+  public static boolean isHtmlFile(String fileName) {
+    String ext = extension(fileName);
+    return ext.equals("html") || ext.equals("htm") || ext.equals("xhtml");
+  }
+
+  /** The {@code file:} URL of a local file, non-ASCII characters and spaces percent-encoded as Chromium does. */
+  public static String fileUrl(Path file) {
+    return file.toAbsolutePath().toUri().toASCIIString();
+  }
+
+  /** The local file a {@code file:} URL points at (query and fragment ignored), or null for any other URL. */
+  public static Path localPath(String url) {
+    if (url == null || !url.regionMatches(true, 0, "file:", 0, 5)) return null;
+    int cut = indexOfAny(url, "?#");
+    try {
+      return Path.of(URI.create(cut >= 0 ? url.substring(0, cut) : url)).normalize();
+    } catch (RuntimeException e) {
+      return null;
+    }
+  }
+
+  private static String extension(String fileName) {
+    if (fileName == null) return "";
+    int dot = fileName.lastIndexOf('.');
+    return dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
   }
 
   /**

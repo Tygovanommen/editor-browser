@@ -116,10 +116,26 @@ public final class Commands {
         JBLabel zoom = field(ed, "zoomLabel", JBLabel.class);
         out.append("address ").append(address.getText()).append('\n');
         out.append("zoomLabel ").append(zoom.isVisible() ? zoom.getText() : "(hidden)").append('\n');
+        JBLabel width = field(ed, "widthLabel", JBLabel.class);
+        out.append("widthLabel ").append(width.isVisible() ? width.getText() : "(hidden)").append('\n');
+        // the page's width in screen px out of the tab's (device width × zoom, centred)
+        javax.swing.JPanel viewport = field(ed, "viewport", javax.swing.JPanel.class);
+        if (browser != null) {
+          out.append("page ").append(browser.getComponent().getWidth()).append(" of ").append(viewport.getWidth())
+              .append(" at x ").append(browser.getComponent().getX()).append('\n');
+        }
         out.append("cef ").append(browser == null ? "none" : browser.getCefBrowser().getURL()).append('\n');
         out.append("cefZoomLevel ").append(browser == null ? "-" : browser.getCefBrowser().getZoomLevel()).append('\n');
         out.append("loading ").append(field(ed, "loading", Boolean.class)).append('\n');
         out.append("focus ").append(describe(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner())).append('\n');
+        // find bar: shown / hidden, its match count, whether its field has focus; the console error badge
+        javax.swing.JPanel findBar = field(ed, "findBar", javax.swing.JPanel.class);
+        JBLabel findCount = field(ed, "findCount", JBLabel.class);
+        JBTextField findField = field(ed, "findField", JBTextField.class);
+        out.append("find ").append(findBar.isVisible() ? "shown" : "hidden").append(" '").append(findCount.getText())
+            .append('\'').append(findField.hasFocus() ? " focused" : "").append('\n');
+        JBLabel errors = field(ed, "errorLabel", JBLabel.class);
+        out.append("errors ").append(errors.isVisible() ? errors.getText() : "0").append('\n');
         out.append("favicon ").append(describeIcon(favicon(ed.getFile())));
       }
       // js <code>: runs JavaScript in the selected browser tab
@@ -168,6 +184,13 @@ public final class Commands {
           String item = String.valueOf(list.getModel().getElementAt(i));
           java.util.regex.Matcher m = java.util.regex.Pattern.compile("label=([^,]*)").matcher(item);
           String label = m.find() ? m.group(1) : item;
+          // an action popup's items (PopupFactoryImpl.ActionItem) have a getText()
+          try {
+            Object text = list.getModel().getElementAt(i).getClass().getMethod("getText").invoke(list.getModel().getElementAt(i));
+            if (text != null) label = text.toString();
+          } catch (ReflectiveOperationException ignored) {
+            // a plain item
+          }
           out.append("item '").append(label).append("'\n");
           if (label.equals(arg)) hit = i;
         }
@@ -230,6 +253,18 @@ public final class Commands {
         out.append("stroke ").append(ks).append(" to ").append(describe(c));
       }
       // toolbar [click]: the New Browser Tab button in the IDE's main toolbar (its icon and tooltip), or clicks it
+      // button <text>: clicks the selected browser tab's toolbar button with that text (e.g. "Device Width")
+      case "button" -> {
+        com.intellij.openapi.actionSystem.impl.ActionButton b = null;
+        for (Component c : all(selectedBrowser().getComponent())) {
+          if (c instanceof com.intellij.openapi.actionSystem.impl.ActionButton ab && ab.isShowing()
+              && arg.equals(ab.getPresentation().getText())) b = ab;
+        }
+        if (b == null) throw new IllegalStateException("no button '" + arg + "' in the browser tab's toolbar");
+        com.intellij.openapi.actionSystem.impl.ActionButton button = b;
+        later(button::click);
+        out.append("clicked '").append(arg).append('\'');
+      }
       case "toolbar" -> {
         AnAction newTab = ActionManager.getInstance().getAction("EditorBrowser.NewTab");
         com.intellij.openapi.actionSystem.impl.ActionButton b = null;
@@ -266,6 +301,69 @@ public final class Commands {
         if (f == null) throw new IllegalArgumentException("no file " + arg);
         new com.intellij.openapi.fileEditor.OpenFileDescriptor(project(), f).navigate(true);
         out.append("opened ").append(f.getName());
+      }
+      // save <path>: adds a newline to a file from disk in its editor document and saves it, as ⌘S would
+      case "save" -> {
+        // the real path: /tmp is a symlink on macOS, and only /private/tmp/… is the project's own file
+        VirtualFile f = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+            .refreshAndFindFileByNioFile(java.nio.file.Path.of(arg).toRealPath());
+        if (f == null) throw new IllegalArgumentException("no file " + arg);
+        com.intellij.openapi.fileEditor.FileDocumentManager fdm = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance();
+        com.intellij.openapi.editor.Document d = fdm.getDocument(f);
+        if (d == null) throw new IllegalStateException("no document for " + arg);
+        // helper commands run in a plain invokeLater: a document change needs write-intent
+        com.intellij.openapi.application.WriteIntentReadAction.run((Runnable) () -> {
+          com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project(), () -> d.insertString(d.getTextLength(), "\n"));
+          fdm.saveDocument(d);
+        });
+        out.append("saved ").append(f.getName());
+      }
+      // closedialogs: cancels the IDE dialogs left open (e.g. by a check that couldn't type into one without focus);
+      // while a modal dialog shows, the plugin's invokeLater updates wait
+      case "closedialogs" -> {
+        for (Window w : Window.getWindows()) {
+          if (!(w instanceof JDialog d) || !d.isShowing()) continue;
+          com.intellij.openapi.ui.DialogWrapper dw = com.intellij.openapi.ui.DialogWrapper.findInstance(d.getContentPane());
+          if (dw != null) dw.close(com.intellij.openapi.ui.DialogWrapper.CANCEL_EXIT_CODE);
+          else d.dispose();
+          out.append("closed '").append(d.getTitle()).append("'\n");
+        }
+      }
+      // call <method>: runs a no-argument method of the selected browser tab (e.g. openFind), no keyboard focus needed
+      case "call" -> {
+        BrowserEditor ed = selectedBrowser();
+        java.lang.reflect.Method m = ed.getClass().getDeclaredMethod(arg);
+        m.setAccessible(true);
+        m.invoke(ed);
+        out.append("called ").append(arg);
+      }
+      // settext <field> <text>: sets the text of a text field of the selected browser tab (findField, address)
+      case "settext" -> {
+        String[] a = arg.split(" ", 2);
+        JTextComponent t = field(selectedBrowser(), a[0], JTextComponent.class);
+        t.setText(a.length > 1 ? a[1] : "");
+        out.append("set ").append(a[0]);
+      }
+      // reloadinfo: what reload on save sees for the selected browser tab
+      case "reloadinfo" -> {
+        BrowserEditor ed = selectedBrowser();
+        out.append("local ").append(nl.netonic.browser.core.Urls.isLocal(ed.getFile() instanceof BrowserFile b ? b.url() : ""))
+            .append(" reloadsItself ").append(field(ed, "pageReloadsItself", Boolean.class))
+            .append(" showing ").append(ed.getComponent().isShowing())
+            .append(" listeners ").append(com.intellij.openapi.application.ApplicationManager.getApplication().getMessageBus()
+                .syncPublisher(com.intellij.openapi.fileEditor.FileDocumentManagerListener.TOPIC).getClass().getSimpleName());
+        Field pending = Class.forName("nl.netonic.browser.ReloadOnSave").getDeclaredField("pending");
+        pending.setAccessible(true);
+        out.append(" pending ").append(pending.get(null));
+      }
+      // focustab <title>: selects the open browser tab with that page title
+      case "focustab" -> {
+        FileEditorManager fem = FileEditorManager.getInstance(project());
+        VirtualFile hit = null;
+        for (VirtualFile f : fem.getOpenFiles()) if (f instanceof BrowserFile b && arg.equals(b.title())) hit = f;
+        if (hit == null) throw new IllegalArgumentException("no browser tab '" + arg + "'");
+        fem.openFile(hit, true);
+        out.append("selected '").append(arg).append('\'');
       }
       case "closefiles" -> {
         FileEditorManager fem = FileEditorManager.getInstance(project());

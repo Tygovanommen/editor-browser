@@ -108,7 +108,28 @@ cat > "$ROOT/site/third.html" <<'EOF'
 <!doctype html>
 <html><head><title>EB Third</title></head><body><h1>Third</h1></body></html>
 EOF
+# console errors: one logged, one thrown
+cat > "$ROOT/site/error.html" <<'EOF'
+<!doctype html>
+<html><head><title>EB Errors</title></head><body><h1>Errors</h1>
+<script>console.error('boom'); undefinedFunction();</script></body></html>
+EOF
+# a page with a dev-server client (Vite's): saving a front-end file leaves it to the dev server
+cat > "$ROOT/site/hmr.html" <<'EOF'
+<!doctype html>
+<html><head><title>EB HMR</title><script type="module" src="/@vite/client"></script></head><body><h1>HMR</h1></body></html>
+EOF
 echo "http://127.0.0.1:$PORT/second.html" > "$ROOT/project/links.md"
+# an HTML file of the project (Open In › Browser Tab); its script, loaded by a relative path, sets the title
+mkdir -p "$ROOT/project/web pages"
+cat > "$ROOT/project/web pages/page.html" <<'EOF'
+<!doctype html>
+<html><head><title>EB Local (script not loaded)</title><script src="page.js"></script></head>
+<body><h1>A file of the project</h1></body></html>
+EOF
+echo "document.title = 'EB Local';" > "$ROOT/project/web pages/page.js"
+echo "console.log('app');" > "$ROOT/project/app.js"
+echo "<?php echo 'hi';" > "$ROOT/project/index.php"
 
 mkdir -p "$IDE/config/options" "$IDE/system" "$IDE/log"
 cp "$USER_CONFIG/phpstorm.key" "$IDE/config/" 2>/dev/null || echo "no phpstorm.key: PhpStorm will ask for a license"
