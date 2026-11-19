@@ -21,7 +21,11 @@ still there after a restart.
 - **Splits like a file:** right-click the tab › *Split Right* for code and site side by side, or two sites at once.
 - **Browser basics in every tab:** back, forward, reload, an address bar, zoom (handy in a narrow split: 80% shows
   the desktop layout) and Chrome DevTools.
-- **Device widths:** the phone/tablet button next to zoom lays the page out at 390 (phone), 768 (tablet) or 1280 px
+- **A toolbar you arrange:** the toolbar keeps to back / forward / reload, the address bar, New Tab, DevTools and a
+  ⋮ menu with the rest (device width, zoom, find, share preview, open in default browser). Under
+  Settings › Tools › Editor Browser (or ⋮ › *Customize Toolbar…*) put each item on the toolbar, in ⋮ or hide it;
+  shortcuts keep working for hidden items.
+- **Device widths:** ⋮ › *Device Width* lays the page out at 390 (phone), 768 (tablet) or 1280 px
   (laptop) wide, centred in the tab, so you see its responsive layout without resizing anything. The width is in
   CSS px, so it scales with the zoom; in a tab narrower than that, the page gets the tab's width. Click the
   "390 px" label (or pick *Full Width*) to go back.
@@ -34,6 +38,10 @@ still there after a restart.
   them, Esc closes it.
 - **Console errors at a glance:** a red badge in the tab's toolbar counts the page's JavaScript console errors;
   hover for the last messages, click to open DevTools.
+- **Share preview:** ⋮ › *Share Preview* (or put its button on the toolbar) shows the link card the page gets when
+  its URL is pasted into Slack, X, LinkedIn or WhatsApp (built from its `og:` / `twitter:` meta tags: image, site,
+  title, description), plus what is missing or too long, e.g. no `og:image`, a relative image URL, a too-small
+  image.
 - **New windows become tabs:** links with `target="_blank"` and `window.open()` open as a new editor tab.
 - **Page source:** right-click the page › *View Page Source* opens the HTML in a new tab (`view-source:` addresses
   work in the address bar too).

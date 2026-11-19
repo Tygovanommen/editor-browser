@@ -8,13 +8,17 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CustomShortcutSet;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.KeepPopupOnPerform;
+import com.intellij.openapi.actionSystem.Separator;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorState;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.DumbAwareToggleAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.SystemInfo;
@@ -24,6 +28,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.jcef.JBCefApp;
@@ -36,6 +41,7 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
+import java.awt.Point;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.KeyAdapter;
@@ -45,6 +51,7 @@ import java.awt.event.MouseEvent;
 import java.beans.PropertyChangeListener;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import javax.swing.Icon;
 import javax.swing.JComponent;
@@ -57,6 +64,10 @@ import nl.netonic.browser.core.ConsoleLog;
 import nl.netonic.browser.core.DeviceWidths;
 import nl.netonic.browser.core.Js;
 import nl.netonic.browser.core.LiveReload;
+import nl.netonic.browser.core.SharePreview;
+import nl.netonic.browser.core.ToolbarLayout;
+import nl.netonic.browser.core.ToolbarLayout.Item;
+import nl.netonic.browser.core.ToolbarLayout.Place;
 import nl.netonic.browser.core.Urls;
 import org.cef.CefSettings;
 import org.cef.browser.CefBrowser;
@@ -125,6 +136,10 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private final JBLabel findCount = new JBLabel();
   private final @Nullable JBCefBrowser browser;
   private @Nullable JBCefJSQuery findCountQuery;
+  private @Nullable JBCefJSQuery shareQuery;
+  /** Share Preview: the button it was opened from (null: from a shortcut / the sandbox), and the popover itself. */
+  private @Nullable Component shareAnchor;
+  private @Nullable JBPopup sharePopup;
   /** Numbers the searches, so a late match count for an older search text is ignored; UI thread only. */
   private int findSeq;
 
@@ -141,6 +156,8 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private volatile long spinUntil;
   /** The toolbar with the reload button: refreshed when the loading state changes; set once in the constructor. */
   private @Nullable ActionToolbar navToolbar;
+  /** The toolbar right of the address bar (optional items + ⋮); set once in the constructor. */
+  private @Nullable ActionToolbar sideToolbar;
   private volatile boolean canGoBack;
   private volatile boolean canGoForward;
   /** The page has a dev-server client that reloads it (see {@link #LIVE_RELOAD_JS}). */
@@ -214,6 +231,12 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       return null;
     });
     Disposer.register(this, findCountQuery);
+    shareQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
+    shareQuery.addHandler(result -> {
+      onEdt(() -> showSharePreview(result));
+      return null;
+    });
+    Disposer.register(this, shareQuery);
     browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
       @Override
       public void onLoadingStateChange(CefBrowser b, boolean isLoading, boolean back, boolean forward) {
@@ -414,9 +437,22 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     }
   }
 
-  /** Toolbar dropdown: Full Width and the {@link DeviceWidths#PRESETS}, the current one ticked. */
-  private DefaultActionGroup deviceWidthGroup() {
-    DefaultActionGroup group = new DefaultActionGroup("Device Width", true);
+  /**
+   * Dropdown (on the toolbar) or submenu (in ⋮): Full Width and the {@link DeviceWidths#PRESETS}, the current one
+   * ticked; shown only where the {@link ToolbarLayout} puts it.
+   */
+  private DefaultActionGroup deviceWidthGroup(Place where) {
+    DefaultActionGroup group = new DefaultActionGroup("Device Width", true) {
+      @Override
+      public void update(@NotNull AnActionEvent e) {
+        e.getPresentation().setVisible(isPlaced(Item.DEVICE_WIDTH, where));
+      }
+
+      @Override
+      public @NotNull ActionUpdateThread getActionUpdateThread() {
+        return ActionUpdateThread.EDT;
+      }
+    };
     group.getTemplatePresentation().setIcon(DEVICE_WIDTH_ICON);
     group.add(widthOption("Full Width", DeviceWidths.FULL));
     group.addSeparator();
@@ -425,7 +461,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   }
 
   private DumbAwareToggleAction widthOption(String text, int cssWidth) {
-    return new DumbAwareToggleAction(text) {
+    DumbAwareToggleAction option = new DumbAwareToggleAction(text) {
       @Override
       public boolean isSelected(@NotNull AnActionEvent e) {
         return deviceWidth() == cssWidth;
@@ -441,6 +477,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         return ActionUpdateThread.EDT;
       }
     };
+    // a toggle keeps its popup open by default; a width is picked once, so close the menu like a plain item
+    option.getTemplatePresentation().setKeepPopupOnPerform(KeepPopupOnPerform.Never);
+    return option;
   }
 
   // --- find in page (Chromium highlights and steps through the matches; JCEF reports no count, see Js.countMatches)
@@ -545,6 +584,33 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     return findBar;
   }
 
+  // --- share preview (the link card chat / social apps build from the page's og: and twitter: meta tags)
+
+  /** Reads the page's meta tags; the popover opens when they come back ({@link #showSharePreview}). */
+  private void openSharePreview() {
+    JBCefJSQuery query = shareQuery;
+    if (query == null) return;
+    withCef(c -> c.executeJavaScript(query.inject(SharePreview.SCRIPT), c.getURL(), 0));
+  }
+
+  private void showSharePreview(String result) {
+    if (browser == null || browser.isDisposed()) return;
+    if (sharePopup != null && !sharePopup.isDisposed()) sharePopup.cancel();
+    JBPopup popup = SharePreviewPopup.create(SharePreview.card(SharePreview.parse(result)));
+    sharePopup = popup;
+    Disposer.register(this, popup);
+    int width = popup.getContent().getPreferredSize().width;
+    Component anchor = shareAnchor;
+    if (anchor != null && anchor.isShowing()) {
+      // right-aligned under the button: it sits towards the right end of the toolbar
+      popup.show(new RelativePoint(anchor, new Point(anchor.getWidth() - width, anchor.getHeight())));
+    } else if (root.isShowing()) {
+      // under the toolbar, at the right, where the button / ⋮ is
+      int y = viewport.isShowing() ? viewport.getY() : 0;
+      popup.show(new RelativePoint(root, new Point(Math.max(0, root.getWidth() - width - JBUI.scale(8)), y)));
+    }
+  }
+
   // --- console errors
 
   private void updateErrorLabel() {
@@ -564,16 +630,16 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         action("Back", AllIcons.Actions.Back, () -> canGoBack, () -> withCef(CefBrowser::goBack)),
         action("Forward", AllIcons.Actions.Forward, () -> canGoForward, () -> withCef(CefBrowser::goForward)),
         new ReloadAction(),
-        ActionManager.getInstance().getAction("EditorBrowser.NewTab"));
+        optional(Item.NEW_TAB, Place.TOOLBAR));
     navToolbar = toolbar(left);
-    DefaultActionGroup right = new DefaultActionGroup(
-        deviceWidthGroup(),
-        action("Zoom Out", AllIcons.General.ZoomOut, () -> zoom() > ZOOM_STEPS[0], () -> zoomStep(-1)),
-        action("Zoom In", AllIcons.General.ZoomIn, () -> zoom() < ZOOM_STEPS[ZOOM_STEPS.length - 1], () -> zoomStep(1)),
-        action("Open in Default Browser", AllIcons.Ide.External_link_arrow, () -> true,
-            () -> BrowserUtil.browse(file.url())),
-        action("Open DevTools", AllIcons.Toolwindows.ToolWindowInspection, () -> browser != null,
-            () -> { if (browser != null) browser.openDevtools(); }));
+    DefaultActionGroup right = new DefaultActionGroup();
+    right.add(deviceWidthGroup(Place.TOOLBAR));
+    for (Item item : Item.values()) {
+      if (item == Item.NEW_TAB || item == Item.DEVICE_WIDTH) continue;
+      right.addAll(optionals(item, Place.TOOLBAR));
+    }
+    right.add(moreGroup());
+    sideToolbar = toolbar(right);
 
     address.getEmptyText().setText("Enter a URL, e.g. localhost:3000");
     address.addKeyListener(new KeyAdapter() {
@@ -633,7 +699,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     JPanel east = new JPanel(new BorderLayout(JBUI.scale(2), 0));
     east.setOpaque(false);
     east.add(labels, BorderLayout.WEST);
-    east.add(toolbar(right).getComponent(), BorderLayout.CENTER);
+    east.add(sideToolbar.getComponent(), BorderLayout.CENTER);
 
     JPanel bar = new JPanel(new BorderLayout(JBUI.scale(4), 0));
     bar.setBorder(JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(2, 4)));
@@ -641,6 +707,112 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     bar.add(address, BorderLayout.CENTER);
     bar.add(east, BorderLayout.EAST);
     return bar;
+  }
+
+  /**
+   * The ⋮ menu: the items the {@link ToolbarLayout} puts there, and Customize Toolbar… (always there, so the
+   * settings are one click away however the items are placed).
+   */
+  private DefaultActionGroup moreGroup() {
+    DefaultActionGroup more = new DefaultActionGroup("More", true);
+    more.getTemplatePresentation().setIcon(AllIcons.Actions.More);
+    more.add(optional(Item.NEW_TAB, Place.MENU));
+    more.addSeparator();
+    more.add(deviceWidthGroup(Place.MENU));
+    for (Item item : Item.values()) {
+      if (item == Item.NEW_TAB || item == Item.DEVICE_WIDTH) continue;
+      more.addAll(optionals(item, Place.MENU));
+      if (item == Item.ZOOM) more.addSeparator();
+    }
+    more.add(Separator.getInstance());
+    more.add(action("Customize Toolbar…", null, () -> true,
+        () -> ShowSettingsUtil.getInstance().showSettingsDialog(project, BrowserConfigurable.class)));
+    return more;
+  }
+
+  private boolean isPlaced(Item item, Place where) {
+    return store.toolbarLayout().place(item) == where;
+  }
+
+  private DumbAwareAction optional(Item item, Place where) {
+    List<DumbAwareAction> actions = optionals(item, where);
+    if (actions.size() != 1) throw new IllegalArgumentException(item + " has " + actions.size() + " actions");
+    return actions.get(0);
+  }
+
+  /**
+   * The action(s) of an optional toolbar item, shown only while the {@link ToolbarLayout} puts the item at
+   * {@code where}. Their shortcuts (registered in {@link #registerShortcuts}) work wherever the item is; the
+   * shortcut set here is only for the tooltip / menu text.
+   */
+  private List<DumbAwareAction> optionals(Item item, Place where) {
+    String mod = SystemInfo.isMac ? "meta" : "control";
+    BooleanSupplier shown = () -> isPlaced(item, where);
+    Runnable devTools = () -> { if (browser != null) browser.openDevtools(); };
+    return switch (item) {
+      case NEW_TAB -> {
+        DumbAwareAction a = action("New Browser Tab", AllIcons.General.Add, shown, () -> true,
+            () -> BrowserTabs.openBlank(project));
+        a.copyShortcutFrom(ActionManager.getInstance().getAction("EditorBrowser.NewTab"));
+        yield List.of(a);
+      }
+      case ZOOM -> where == Place.MENU
+          ? List.of(
+              withKeys(action("Zoom In", AllIcons.General.ZoomIn, shown, this::canZoomIn, () -> zoomStep(1)), mod + " EQUALS"),
+              withKeys(action("Zoom Out", AllIcons.General.ZoomOut, shown, this::canZoomOut, () -> zoomStep(-1)), mod + " MINUS"),
+              withKeys(action("Actual Size", AllIcons.General.ActualZoom, shown, () -> zoom() != 100, () -> setZoom(100)), mod + " 0"))
+          : List.of(
+              withKeys(action("Zoom Out", AllIcons.General.ZoomOut, shown, this::canZoomOut, () -> zoomStep(-1)), mod + " MINUS"),
+              withKeys(action("Zoom In", AllIcons.General.ZoomIn, shown, this::canZoomIn, () -> zoomStep(1)), mod + " EQUALS"));
+      case FIND -> List.of(withKeys(
+          action("Find in Page", AllIcons.Actions.Find, shown, () -> browser != null, this::openFind), mod + " F"));
+      case SHARE_PREVIEW -> List.of(new DumbAwareAction("Share Preview",
+          "How a link to this page looks in chat and social apps", AllIcons.Actions.Share) {
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+          // from the toolbar the popover opens under the button; from ⋮ (its list is gone by then) at the right
+          shareAnchor = e.getInputEvent() == null ? null : e.getInputEvent().getComponent();
+          openSharePreview();
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+          boolean visible = shown.getAsBoolean();
+          e.getPresentation().setVisible(visible);
+          e.getPresentation().setEnabled(visible && browser != null && !Urls.BLANK.equalsIgnoreCase(file.url()));
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+          return ActionUpdateThread.EDT;
+        }
+      });
+      case OPEN_EXTERNAL -> List.of(action("Open in Default Browser", AllIcons.Ide.External_link_arrow, shown, () -> true,
+          () -> BrowserUtil.browse(file.url())));
+      case DEVTOOLS -> List.of(withKeys(
+          action("Open DevTools", AllIcons.Toolwindows.ToolWindowInspection, shown, () -> browser != null, devTools), "F12"));
+      case DEVICE_WIDTH -> throw new IllegalArgumentException("a group, see deviceWidthGroup");
+    };
+  }
+
+  private boolean canZoomIn() {
+    return zoom() < ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  }
+
+  private boolean canZoomOut() {
+    return zoom() > ZOOM_STEPS[0];
+  }
+
+  /** Shows the keystroke in the tooltip / menu; no component, so this doesn't bind it (see registerShortcuts). */
+  private static DumbAwareAction withKeys(DumbAwareAction action, String keystroke) {
+    action.registerCustomShortcutSet(CustomShortcutSet.fromString(keystroke), null);
+    return action;
+  }
+
+  /** The toolbar layout changed in the settings: show / hide the items now rather than on the next periodic update. */
+  public void toolbarLayoutChanged() {
+    if (navToolbar != null) navToolbar.updateActionsAsync();
+    if (sideToolbar != null) sideToolbar.updateActionsAsync();
   }
 
   private ActionToolbar toolbar(DefaultActionGroup group) {
@@ -675,7 +847,12 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     DumbAwareAction.create(e -> run.run()).registerCustomShortcutSet(CustomShortcutSet.fromString(keystroke), root, this);
   }
 
-  private static DumbAwareAction action(String text, Icon icon, java.util.function.BooleanSupplier enabled, Runnable run) {
+  private static DumbAwareAction action(String text, @Nullable Icon icon, BooleanSupplier enabled, Runnable run) {
+    return action(text, icon, () -> true, enabled, run);
+  }
+
+  private static DumbAwareAction action(String text, @Nullable Icon icon, BooleanSupplier visible, BooleanSupplier enabled,
+      Runnable run) {
     return new DumbAwareAction(text, null, icon) {
       @Override
       public void actionPerformed(@NotNull AnActionEvent e) {
@@ -684,7 +861,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
       @Override
       public void update(@NotNull AnActionEvent e) {
-        e.getPresentation().setEnabled(enabled.getAsBoolean());
+        boolean shown = visible.getAsBoolean();
+        e.getPresentation().setVisible(shown);
+        e.getPresentation().setEnabled(shown && enabled.getAsBoolean());
       }
 
       @Override
@@ -797,6 +976,12 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   @Override
   public @NotNull VirtualFile getFile() {
     return file;
+  }
+
+  @Override
+  public void deselectNotify() {
+    // another tab: the popover is about this page
+    if (sharePopup != null && !sharePopup.isDisposed()) sharePopup.cancel();
   }
 
   @Override

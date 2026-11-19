@@ -119,6 +119,18 @@ cat > "$ROOT/site/hmr.html" <<'EOF'
 <!doctype html>
 <html><head><title>EB HMR</title><script type="module" src="/@vite/client"></script></head><body><h1>HMR</h1></body></html>
 EOF
+# share preview: Open Graph / Twitter tags; the image is the 1x1 favicon (so the popover says it is too small)
+cat > "$ROOT/site/share.html" <<EOF
+<!doctype html>
+<html><head><title>EB Share</title>
+<meta property="og:title" content="EB Share card">
+<meta property="og:description" content="What a link to this page shows">
+<meta property="og:image" content="http://127.0.0.1:$PORT/favicon.png">
+<meta property="og:url" content="http://127.0.0.1:$PORT/share.html">
+<meta property="og:site_name" content="EB Site">
+<meta name="twitter:card" content="summary_large_image">
+</head><body><h1>Share</h1></body></html>
+EOF
 echo "http://127.0.0.1:$PORT/second.html" > "$ROOT/project/links.md"
 # an HTML file of the project (Open In › Browser Tab); its script, loaded by a relative path, sets the title
 mkdir -p "$ROOT/project/web pages"

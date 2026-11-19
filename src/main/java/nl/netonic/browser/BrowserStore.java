@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import nl.netonic.browser.core.DeviceWidths;
+import nl.netonic.browser.core.ToolbarLayout;
 import nl.netonic.browser.core.Urls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -34,9 +35,13 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     public List<String> recent = new ArrayList<>();
     public boolean autoOpenDevServer = true;
     public boolean reloadOnSave = true;
+    /** {@link ToolbarLayout#toStored()}: item → place, only the items moved from their default place. */
+    public Map<String, String> toolbar = new LinkedHashMap<>();
   }
 
   private Data data = new Data();
+  /** {@link Data#toolbar} parsed; read by every toolbar update, so kept rather than parsed each time. */
+  private ToolbarLayout toolbarLayout = ToolbarLayout.DEFAULT;
 
   public static BrowserStore getInstance() {
     return ApplicationManager.getApplication().getService(BrowserStore.class);
@@ -50,6 +55,7 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
   @Override
   public synchronized void loadState(@NotNull Data state) {
     data = state;
+    toolbarLayout = ToolbarLayout.parse(state.toolbar);
   }
 
   public synchronized boolean has(String id) {
@@ -125,6 +131,16 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
 
   public synchronized void setReloadOnSave(boolean value) {
     data.reloadOnSave = value;
+  }
+
+  /** Where the optional toolbar items go (toolbar, ⋮ menu or hidden). */
+  public synchronized ToolbarLayout toolbarLayout() {
+    return toolbarLayout;
+  }
+
+  public synchronized void setToolbarLayout(ToolbarLayout layout) {
+    toolbarLayout = layout;
+    data.toolbar = new LinkedHashMap<>(layout.toStored());
   }
 
   /**

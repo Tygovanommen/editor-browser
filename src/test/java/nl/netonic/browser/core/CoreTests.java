@@ -2,6 +2,7 @@ package nl.netonic.browser.core;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -30,6 +31,8 @@ public final class CoreTests {
     test("LiveReload: which saves reload a page", CoreTests::liveReload);
     test("ConsoleLog: count, last messages, file names", CoreTests::consoleLog);
     test("Js: string literals and the match-count script", CoreTests::js);
+    test("SharePreview: tags, fallbacks, warnings, image crop", CoreTests::sharePreview);
+    test("ToolbarLayout: defaults, changes, saved form", CoreTests::toolbarLayout);
 
     System.out.println();
     System.out.println(passed + " passed, " + failed.size() + " failed");
@@ -243,6 +246,36 @@ public final class CoreTests {
     eq("", ConsoleLog.fileName(null));
   }
 
+  static void toolbarLayout() {
+    ToolbarLayout d = ToolbarLayout.DEFAULT;
+    eq(ToolbarLayout.Place.TOOLBAR, d.place(ToolbarLayout.Item.DEVTOOLS));
+    eq(ToolbarLayout.Place.TOOLBAR, d.place(ToolbarLayout.Item.NEW_TAB));
+    eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.ZOOM));
+    eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.DEVICE_WIDTH));
+    eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.SHARE_PREVIEW));
+    eq(java.util.Map.of("sharePreview", "toolbar"),
+        d.with(ToolbarLayout.Item.SHARE_PREVIEW, ToolbarLayout.Place.TOOLBAR).toStored());
+    yes(d.isDefault());
+    eq(java.util.Map.of(), d.toStored());
+
+    ToolbarLayout l = d.with(ToolbarLayout.Item.ZOOM, ToolbarLayout.Place.TOOLBAR)
+        .with(ToolbarLayout.Item.DEVTOOLS, ToolbarLayout.Place.HIDDEN);
+    eq(ToolbarLayout.Place.TOOLBAR, l.place(ToolbarLayout.Item.ZOOM));
+    eq(ToolbarLayout.Place.HIDDEN, l.place(ToolbarLayout.Item.DEVTOOLS));
+    eq(ToolbarLayout.Place.MENU, l.place(ToolbarLayout.Item.FIND));
+    eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.ZOOM)); // immutable
+    no(l.isDefault());
+    // only changes are saved; back to the default place drops the entry
+    eq(java.util.Map.of("zoom", "toolbar", "devTools", "hidden"), l.toStored());
+    eq(java.util.Map.of("zoom", "toolbar"), l.with(ToolbarLayout.Item.DEVTOOLS, ToolbarLayout.Place.TOOLBAR).toStored());
+    eq(l, ToolbarLayout.parse(l.toStored()));
+
+    // unknown items / places (a newer version's) and null are ignored
+    eq(d, ToolbarLayout.parse(null));
+    eq(java.util.Map.of("find", "hidden"),
+        ToolbarLayout.parse(java.util.Map.of("find", "hidden", "bogus", "toolbar", "zoom", "sideways")).toStored());
+  }
+
   static void js() {
     eq("\"a\\\"b\\\\c\\n\\u003c/script>\"", Js.string("a\"b\\c\n</script>"));
     eq("\"\\u2028\\u0001\"", Js.string("\u2028\u0001"));
@@ -250,6 +283,66 @@ public final class CoreTests {
     String script = Js.countMatches("It's", 7);
     yes(script.contains("return '7:' + c;"));
     yes(script.endsWith("(\"It's\")"));
+  }
+
+  static void sharePreview() {
+    String page = "http://127.0.0.1:8765/share/page.html";
+    // the script's output: first value per key wins, empty values and malformed lines are dropped
+    Map<String, String> tags = SharePreview.parse("@url\t" + page + "\n@title\tPage\nog:title\tShared title\n"
+        + "og:title\tsecond\nog:description\tAbout it\nog:image\t/img/card.png\nnonsense\ndescription\t\n"
+        + "og:url\thttps://example.com/page\ntwitter:card\tsummary_large_image");
+    eq("Shared title", tags.get("og:title"));
+    no(tags.containsKey("description"));
+    SharePreview.Card card = SharePreview.card(tags);
+    eq("Shared title", card.title());
+    eq("About it", card.description());
+    eq("http://127.0.0.1:8765/img/card.png", card.image());
+    eq("example.com", card.site());
+    eq("https://example.com/page", card.url());
+    eq(List.of("og:image is a relative URL: crawlers need an absolute one"), card.warnings());
+
+    // nothing but a <title> and a meta description: those show, and the og: tags are reported missing
+    SharePreview.Card bare = SharePreview.card(SharePreview.parse("@url\thttps://www.shop.test/x\n@title\tShop\n"
+        + "description\tCheap things"));
+    eq("Shop", bare.title());
+    eq("Cheap things", bare.description());
+    eq(null, bare.image());
+    eq("shop.test", bare.site());
+    eq(List.of("No og:title: apps fall back to <title>", "No og:description: apps fall back to the meta description",
+        "No og:image: most apps show a text-only link",
+        "No og:url or canonical link: shares of this page under other URLs aren't combined",
+        "No twitter:card: X shows a small card (summary_large_image for a big image)"), bare.warnings());
+
+    // twitter: fallbacks, og:site_name, canonical, too long, local image on a public page
+    String longTitle = "x".repeat(SharePreview.TITLE_MAX + 1);
+    SharePreview.Card tw = SharePreview.card(SharePreview.parse("@url\thttps://example.com/a b\n"
+        + "twitter:title\t" + longTitle + "\ntwitter:description\td\ntwitter:image\thttp://localhost:3000/i.png\n"
+        + "og:site_name\tExample\n@canonical\t/a\ntwitter:card\tsummary"));
+    eq(longTitle, tw.title());
+    eq("Example", tw.site());
+    eq("https://example.com/a", tw.url());
+    eq("http://localhost:3000/i.png", tw.image());
+    eq(List.of("No og:title: apps fall back to twitter:title", "No og:description: apps fall back to twitter:description",
+        "og:image points at a local server that other sites can't reach",
+        "Title is 61 characters: most apps cut it off after about 60"), tw.warnings());
+
+    eq(List.of("No title: add og:title (or a <title>)", "No description: add og:description",
+        "No og:image: most apps show a text-only link",
+        "No og:url or canonical link: shares of this page under other URLs aren't combined",
+        "No twitter:card: X shows a small card (summary_large_image for a big image)"),
+        SharePreview.card(SharePreview.parse(null)).warnings());
+
+    eq(null, SharePreview.imageWarning(1200, 630));
+    eq(null, SharePreview.imageWarning(0, 0));
+    yes(SharePreview.imageWarning(1, 1).startsWith("Image is 1 × 1 px"));
+    // cover crop to 1.91 : 1: a square loses top and bottom, a wide banner its sides
+    eq(List.of(0, 237, 1000, 525), box(SharePreview.coverCrop(1000, 1000)));
+    eq(List.of(0, 0, 1200, 630), box(SharePreview.coverCrop(1200, 630)));
+    eq(List.of(400, 0, 1200, 630), box(SharePreview.coverCrop(2000, 630)));
+  }
+
+  private static List<Integer> box(int[] r) {
+    return List.of(r[0], r[1], r[2], r[3]);
   }
 
   static void deviceWidths() {

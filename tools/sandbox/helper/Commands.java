@@ -265,6 +265,34 @@ public final class Commands {
         later(button::click);
         out.append("clicked '").append(arg).append('\'');
       }
+      // buttons: the buttons showing in the selected browser tab's toolbars, one per line
+      case "buttons" -> {
+        for (Component c : all(selectedBrowser().getComponent())) {
+          if (c instanceof com.intellij.openapi.actionSystem.impl.ActionButton ab && ab.isShowing()) {
+            out.append("button '").append(ab.getPresentation().getText()).append("'\n");
+          }
+        }
+      }
+      // layout default | <item>=<toolbar|menu|hidden> …: sets the toolbar layout (as Settings › Apply does)
+      case "layout" -> {
+        nl.netonic.browser.core.ToolbarLayout layout = nl.netonic.browser.core.ToolbarLayout.DEFAULT;
+        if (!arg.equals("default")) {
+          java.util.Map<String, String> stored = new java.util.LinkedHashMap<>();
+          for (String kv : arg.split(" ")) {
+            String[] a = kv.split("=", 2);
+            stored.put(a[0], a[1]);
+          }
+          layout = nl.netonic.browser.core.ToolbarLayout.parse(stored);
+          if (!layout.toStored().equals(stored)) throw new IllegalArgumentException("unknown item or place in: " + arg);
+        }
+        nl.netonic.browser.BrowserStore.getInstance().setToolbarLayout(layout);
+        for (com.intellij.openapi.project.Project pr : com.intellij.openapi.project.ProjectManager.getInstance().getOpenProjects()) {
+          for (com.intellij.openapi.fileEditor.FileEditor ed : com.intellij.openapi.fileEditor.FileEditorManager.getInstance(pr).getAllEditors()) {
+            if (ed instanceof BrowserEditor b) b.toolbarLayoutChanged();
+          }
+        }
+        out.append("layout ").append(layout.toStored());
+      }
       case "toolbar" -> {
         AnAction newTab = ActionManager.getInstance().getAction("EditorBrowser.NewTab");
         com.intellij.openapi.actionSystem.impl.ActionButton b = null;
@@ -336,6 +364,39 @@ public final class Commands {
         m.setAccessible(true);
         m.invoke(ed);
         out.append("called ").append(arg);
+      }
+      // popup [close | sizes | shot <file>]: the text of the selected browser tab's Share Preview popover, one label
+      // per line; or closes it, lists its components' sizes, or paints it to a PNG (it is a window of its own)
+      case "popup" -> {
+        com.intellij.openapi.ui.popup.JBPopup popup =
+            field(selectedBrowser(), "sharePopup", com.intellij.openapi.ui.popup.JBPopup.class);
+        if (popup == null || popup.isDisposed() || !popup.isVisible()) {
+          out.append("no popup");
+        } else if (arg.equals("close")) {
+          popup.cancel();
+          out.append("closed");
+        } else if (arg.equals("sizes")) {
+          for (Component c : all(popup.getContent())) {
+            out.append(c.getClass().getSimpleName()).append(' ').append(c.getWidth()).append('x').append(c.getHeight())
+                .append(" pref ").append(c.getPreferredSize().width).append('x').append(c.getPreferredSize().height).append('\n');
+          }
+        } else if (arg.startsWith("shot ")) {
+          javax.swing.JComponent content = popup.getContent();
+          BufferedImage img = new BufferedImage(content.getWidth() * 2, content.getHeight() * 2, BufferedImage.TYPE_INT_ARGB);
+          Graphics2D g = img.createGraphics();
+          g.scale(2, 2);
+          content.paint(g);
+          g.dispose();
+          ImageIO.write(img, "png", new File(arg.substring(5)));
+          out.append("wrote ").append(arg.substring(5));
+        } else {
+          for (Component c : all(popup.getContent())) {
+            if (c instanceof JBLabel l && l.isShowing()) {
+              out.append("label ").append(l.getText().replaceAll("<[^>]*>", "").replace("&amp;", "&")
+                  .replace("&lt;", "<").replace("&gt;", ">").replace("&#39;", "'").replace("&quot;", "\"")).append('\n');
+            }
+          }
+        }
       }
       // settext <field> <text>: sets the text of a text field of the selected browser tab (findField, address)
       case "settext" -> {

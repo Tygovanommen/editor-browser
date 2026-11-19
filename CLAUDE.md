@@ -8,9 +8,9 @@ Why it exists: PhpStorm's "Open in Editor Tab" for tool windows only works for t
 internal `ToolWindowInEditorSupport` (the Terminal does), so browser plugins such as GBrowser stay side panels.
 This plugin makes each site a (virtual) file instead, so it is a real editor tab.
 
-## Status (18 Nov 2026)
+## Status (19 Nov 2026)
 
-- Version 0.3.1, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.4.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
   API use. `tools/sandbox/e2e.sh` passed 31/31 for 0.2.2. For 0.3.0 (19 Nov 2026) the last full run was 43/54:
@@ -19,6 +19,9 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   page source" failed after the restart — likely the editor tab limit closing the oldest tabs now that more
   sections open tabs (unconfirmed). The keyboard checks need the sandbox window to keep focus: if many fail
   with `focus null`, something else took focus; rerun.
+- 0.4.0 (toolbar layout + Share Preview, 19 Nov 2026): full `e2e.sh` 72/75. The 3 failures: typing into the
+  address bar (focus), "the source tab reopens as page source" (as above), and a Share Preview check that was a
+  `pipefail` bug in the test itself (fixed, passes on its own; the full suite wasn't rerun).
 - `EditorEmptyTextProvider`/`EditorEmptyTextSink` (`impl` package) are `@ApiStatus.Internal` with no stable
   replacement; don't reintroduce an empty-editor-placeholder hint through them, `api-check.sh` will flag it.
 - Not verified yet: building against 2026.2.3 in the release workflow (the Linux tarball's JCEF folder is matched
@@ -55,10 +58,24 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   has no find-result handler, so the match count comes from `core/Js.countMatches` run in the page (body
   `innerText`, iframes not counted). Console errors: `onConsoleMessage` (ERROR / FATAL) → `core/ConsoleLog` → red
   badge left of the zoom label (tooltip = last 5, click = DevTools), cleared by `onLoadStart` of the main frame.
-  Device width: the toolbar dropdown (`deviceWidthGroup`, icon `icons/deviceWidth.svg`) sets
+  Toolbar layout: back / forward / reload + address bar are fixed; the optional items (`core/ToolbarLayout.Item`:
+  New Tab, Device Width, Zoom, Find, Share Preview, Open in Default Browser, DevTools) each go on the toolbar, in the ⋮ menu
+  (`moreGroup`, always shown, ends with *Customize Toolbar…*) or hidden — `BrowserStore.toolbar` (only items moved
+  from their default; default: New Tab + DevTools on the toolbar, the rest in ⋮). Every item exists twice (toolbar
+  + ⋮ copy), each `update()` showing itself only where the layout puts it, so nothing is rebuilt; Settings › Apply
+  calls `toolbarLayoutChanged` for an immediate refresh. Shortcuts are registered separately and work for hidden
+  items; `withKeys` only shows the keystroke (`registerCustomShortcutSet(…, null)`: `setShortcutSet` is internal).
+  Device width: the dropdown (`deviceWidthGroup`, icon `icons/deviceWidth.svg`, on the toolbar or a ⋮ submenu) sets
   `BrowserStore.width` (CSS px, absent = full); the browser component sits in a `Viewport` panel that centres it at
   `core/DeviceWidths.frameWidth` (width × zoom, clamped to the tab) — a plain resize, so the page's media queries and
   `innerWidth` see the preset; `setZoom` re-lays it out. A "390 px" label left of the zoom label resets it.
+  Share preview (`ToolbarLayout.Item.SHARE_PREVIEW`, in ⋮ by default; `openSharePreview`): `core/SharePreview.SCRIPT`
+  reads the page's `<meta property|name>` tags, `<title>`, canonical link and base URL as `key\tvalue` lines;
+  `SharePreview.card` applies the apps' fallbacks (og: → twitter: → `<title>` / meta description) and lists the
+  warnings; `SharePreviewPopup` (a `JBPopup` right-aligned under the toolbar button, or at the toolbar's right from
+  ⋮; closed by `deselectNotify`) draws the card and downloads `og:image` itself, as the apps' crawlers do (no
+  browser cookies; ImageIO: PNG / JPEG / GIF, not WebP), cropped to 1.91 : 1. In a `JComponent` subclass a bare
+  `WIDTH` / `HEIGHT` is `ImageObserver`'s constant (1 / 2), not an outer class's: hence `CARD_WIDTH`.
 - Reload on save: `ReloadOnSave` (application `FileDocumentManagerListener.afterDocumentSaved`, setting
   `BrowserStore.reloadOnSave`, default on) collects saves for 300 ms, keeps those in a project's content and calls
   `BrowserEditor.reloadAfterSave`: a local page (`Urls.isLocal`) reloads, a `file:` page when the saved file is in
@@ -69,6 +86,8 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 - `BrowserTabTitleProvider` — tab text = page title (40 chars) or host; tooltip = URL.
 - `BrowserTabs` — open a URL as a new tab (`OpenFileDescriptor.navigate`); `openOrReuse` / `openDevServerPort`
   for the automatic dev-server tabs (reuse the tab on the same host:port; loopback names count as `localhost`).
+- `BrowserConfigurable` (Settings › Tools › Editor Browser): dev-server auto-open, reload on save, and a
+  "Browser Tab Toolbar" section with a Toolbar / ⋮ menu / Hidden combo per `ToolbarLayout.Item` + Reset to defaults.
 - Dev-server auto-detect, one setting (`BrowserConfigurable`, `BrowserStore.autoOpenDevServer`), two sources:
   `DevServerWatcher` (`ExecutionListener`: a run configuration's console prints a localhost URL) and
   `DevServerPoller` (app service, started by the `DevServerPollerStarter` post-startup activity): every 2 s reads
@@ -108,13 +127,15 @@ tools/sandbox/e2e.sh     # macOS: sandboxed PhpStorm (own config under /tmp/ebde
 - Sandbox (`tools/sandbox/`): `demo.sh` starts PhpStorm with its own config/system/plugins and serves
   `/tmp/ebdemo/site` on `127.0.0.1:8765` (`EBDEMO_PORT`); `cmd.sh <command>` talks to the helper plugin
   (`helper/Commands.java`: `open`, `tabs`, `state`, `js`, `click x y`, `rclick x y` (Chromium's context menu),
+  `buttons` (the tab's visible toolbar buttons), `layout default | item=place …` (set the toolbar layout),
   `menu [label]` (list / pick an item of the open list popup), `dump`, `stroke "meta L"`, `action <id>`, `type`,
   `key`, `file`, `select`, `shot`, `quit`; `demo.sh --probe` reloads it without a restart). JCEF runs off-screen
   (OSR) there, so `shot` (Swing paint) includes the page. A script `click()` on a `target=_blank` link is blocked
   as a popup without a user gesture: use `click x y` (real mouse event) for that.
   Without keyboard focus (`focus null`: another app in front) use the focus-free commands: `call <method>` (a
   no-argument method of the selected `BrowserEditor`, e.g. `openFind`), `settext <field> <text>`, `save <path>`
-  (edit + save a project file, as ⌘S), `focustab <title>`, `reloadinfo`, `closedialogs`. A dialog left open by a
+  (edit + save a project file, as ⌘S), `focustab <title>`, `reloadinfo`, `closedialogs`, `popup [close | sizes |
+  shot <file>]` (the Share Preview popover's text; `shot` paints it, the window `shot` doesn't include popups). A dialog left open by a
   failed keyboard check holds back every later `invokeLater` (default modality), so unrelated checks fail after it:
   `closedialogs` first. `/tmp` is a symlink on macOS: only the `/private/tmp/…` VirtualFile is in the project's
   content. Run one sandbox at a time (they steal focus from each other, and each one's dev-port poller opens

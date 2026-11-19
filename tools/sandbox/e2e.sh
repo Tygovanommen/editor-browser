@@ -84,27 +84,54 @@ c stroke "meta MINUS" >/dev/null; sleep 1; c stroke "meta MINUS" >/dev/null
 contains "⌘- twice: 80%, label shown" "zoomLabel 80%" c state
 c stroke "meta 0" >/dev/null
 contains "⌘0 resets" "zoomLabel (hidden)" c state
-# device width: the toolbar dropdown lays the page out at a phone width, centred; it scales with the zoom
+# more <item> [<subitem>]: picks an item of the toolbar's ⋮ menu (Device Width and Zoom are there by default)
+more() {
+  c button "More" >/dev/null
+  until_has 10 "item '$1'" c menu || { echo "no '$1' in the ⋮ menu"; return 1; }
+  c menu "$1" >/dev/null
+  [ -z "${2:-}" ] && return 0
+  until_has 10 "item '$2'" c menu || { echo "no '$2' in the '$1' submenu"; return 1; }
+  c menu "$2" >/dev/null
+}
+# device width: ⋮ › Device Width lays the page out at a phone width, centred; it scales with the zoom
 innerWidth() { c js "document.title='w '+window.innerWidth" >/dev/null; sleep 1; c tabs | sed -n "s/^\* browser 'w \([0-9]*\)'.*/\1/p"; }
-c button "Device Width" >/dev/null
-until_has 10 "item 'Phone (390 px)'" c menu
-c menu "Phone (390 px)" >/dev/null
+more "Device Width" "Phone (390 px)"
 contains "Device Width › Phone: label shows 390 px" "widthLabel 390 px" c state
 contains "the page area is 390 px wide" "page 390 of" c state
 w=$(innerWidth); [ "$w" = 390 ] && pass "the page sees a 390 px viewport" || fail "the page sees a 390 px viewport" "innerWidth $w"
-c button "Zoom Out" >/dev/null
-contains "zoomed out to 90% the column narrows (351 px)" "page 351 of" c state
-c button "Zoom In" >/dev/null
-contains "zoomed back to 100%: 390 px again" "page 390 of" c state
-c button "Device Width" >/dev/null
-until_has 10 "item 'Full Width'" c menu
-c menu "Full Width" >/dev/null
+more "Zoom Out"
+contains "⋮ › Zoom Out: 90%, the column narrows (351 px)" "page 351 of" c state
+more "Zoom In"
+contains "⋮ › Zoom In: back to 100%, 390 px again" "page 390 of" c state
+more "Device Width" "Full Width"
 contains "Full Width hides the label" "widthLabel (hidden)" c state
 contains "and the page fills the tab again" "at x 0" c state
 c js "location.reload()" >/dev/null; sleep 2
 c stroke "meta L" >/dev/null
 contains "⌘L focuses the address bar" "focus JBTextField" c state
 c key esc >/dev/null
+
+section "5b Toolbar layout (Settings › Tools › Editor Browser)"
+contains "default: DevTools on the toolbar" "button 'Open DevTools'" c buttons
+[[ "$(c buttons)" != *"button 'Zoom In'"* ]] && pass "default: zoom buttons only in ⋮" || fail "default: zoom buttons only in ⋮" "$(c buttons | tr '\n' ' ')"
+c button "More" >/dev/null
+contains "⋮ ends with Customize Toolbar…" "item 'Customize Toolbar…'" c menu
+contains "⋮ has Share Preview by default" "item 'Share Preview'" c menu
+c menu "Find in Page" >/dev/null
+contains "⋮ › Find in Page opens the find bar" "find shown" c state
+c call closeFind >/dev/null
+c layout zoom=toolbar devTools=menu newTab=hidden >/dev/null
+contains "zoom moved to the toolbar shows up there" "button 'Zoom In'" c buttons
+out=$(c buttons)
+[[ "$out" != *"button 'Open DevTools'"* && "$out" != *"button 'New Browser Tab'"* ]] \
+  && pass "DevTools (moved to ⋮) and New Tab (hidden) leave the toolbar" || fail "DevTools and New Tab leave the toolbar" "$(echo "$out" | tr '\n' ' ')"
+c button "More" >/dev/null
+out=$(until_has 10 "item 'Open DevTools'" c menu && c menu)
+[[ "$out" == *"item 'Open DevTools'"* && "$out" != *"item 'Zoom In'"* && "$out" != *"item 'New Browser Tab'"* ]] \
+  && pass "⋮ now has DevTools, no zoom, no New Tab" || fail "⋮ follows the layout" "$(echo "$out" | tr '\n' ' ')"
+c menu "Find in Page" >/dev/null; c call closeFind >/dev/null
+c layout default >/dev/null
+contains "back to the default layout" "button 'New Browser Tab'" c buttons
 
 section "6 New Tab"
 c action EditorBrowser.NewTab >/dev/null
@@ -228,13 +255,54 @@ c save "$ROOT/project/index.php" >/dev/null; sleep 3
 c focustab "EB HMR Marked" >/dev/null
 contains "… it reloads when shown" "* browser 'EB HMR' " selected
 
+section "10b Share preview"
+c closedialogs >/dev/null
+c open "$SITE/share.html" >/dev/null
+until_has 15 "* browser 'EB Share'" c tabs
+c call openSharePreview >/dev/null
+contains "Share Preview shows the og: title in a popover" "label EB Share card" c popup
+contains "… with og:site_name and og:description" "label What a link to this page shows" c popup
+contains "… and downloads og:image: a 1x1 image is too small" "label Image is 1 × 1 px" c popup
+c popup close >/dev/null
+contains "the popover closes" "no popup" c popup
+more "Share Preview"
+contains "⋮ › Share Preview opens it too" "label EB Share card" c popup
+c popup close >/dev/null
+c layout sharePreview=toolbar >/dev/null
+contains "Share Preview moved to the toolbar" "button 'Share Preview'" c buttons
+c button "Share Preview" >/dev/null
+contains "… and its button opens the popover" "label EB Share card" c popup
+# captured first: with pipefail, grep -q closing the pipe early would fail the check
+sizes=$(c popup sizes)
+grep -qE "^ImageBox [1-9][0-9]*x[1-9][0-9]* " <<<"$sizes" && pass "… with room for the image (not collapsed)" \
+  || fail "… with room for the image (not collapsed)" "$(grep ImageBox <<<"$sizes")"
+c open "$SITE/second.html" >/dev/null
+until_has 15 "* browser 'EB Second'" c tabs
+c focustab "EB Share" >/dev/null
+c call openSharePreview >/dev/null
+until_has 10 "label EB Share card" c popup
+c focustab "EB Second" >/dev/null
+contains "switching to another tab closes it" "no popup" c popup
+c focustab "EB Share" >/dev/null
+c popup close >/dev/null
+c layout default >/dev/null
+c open "$SITE/second.html" >/dev/null
+until_has 15 "* browser 'EB Second'" c tabs
+c call openSharePreview >/dev/null
+contains "a page without share tags: falls back to <title>" "label No og:title: apps fall back to <title>" c popup
+contains "… and says the image is missing" "label No og:image" c popup
+c popup close >/dev/null
+
 section "11 Restart"
 before=$(c tabs | grep -c "browser '")
+c layout find=toolbar >/dev/null
 tools/sandbox/demo.sh --restart "$ROOT" >/dev/null
 ready
 contains "browser tabs reopen after a restart ($before)" "browser 'EB" c tabs
 contains "the source tab reopens as page source" "browser 'view-source:127.0.0.1:$PORT/third.html' view-source:" c tabs
 contains "the HTML file tab reopens on the file" "browser 'EB Local' file://" c tabs
+contains "the toolbar layout is kept (Find in Page on the toolbar)" "button 'Find in Page'" c buttons
+c layout default >/dev/null
 after=$(c tabs | grep -c "browser '")
 [ "$after" = "$before" ] && pass "same number of browser tabs ($after)" || fail "same number of browser tabs" "$before → $after"
 

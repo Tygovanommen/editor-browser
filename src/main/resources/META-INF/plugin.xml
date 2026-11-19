@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.3.1</version>
+  <version>0.4.0</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -18,6 +18,9 @@
       <li>Saving a project file reloads the tabs on a local page (<code>localhost</code>, <code>*.test</code>, …);
           pages with their own hot reload (Vite, webpack) are left to it for front-end files.</li>
       <li>Find in page (⌘F), and a toolbar badge counting the page's console errors.</li>
+      <li>A toolbar you arrange: put each optional button on the toolbar, in its ⋮ menu or hide it.</li>
+      <li>Share preview: the link card a page gets in Slack, X, LinkedIn or WhatsApp (its <code>og:</code> /
+          <code>twitter:</code> meta tags), in a popover, with what is missing.</li>
       <li>Links that open a new window (<code>target="_blank"</code>) open as a new tab.</li>
       <li>Tabs come back after a restart on the page you left them; logins are shared by all tabs.</li>
       <li>Right-click a selected URL in code › <i>Open in Editor Tab</i>.</li>
@@ -32,6 +35,17 @@
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.4.0</p>
+    <ul>
+      <li>Share Preview: shows the link card the page gets when its URL is pasted into Slack, X, LinkedIn or
+          WhatsApp (its <code>og:</code> / <code>twitter:</code> meta tags: image, site, title, description) in a
+          popover, with what is missing or too long: no <code>og:image</code>, a relative image URL, an image under
+          600 × 315 px, a title past 60 characters, …</li>
+      <li>A calmer toolbar: back / forward / reload, the address bar, New Tab and DevTools, plus a ⋮ menu with
+          device width, zoom, find, share preview and open in default browser. Settings › Tools › Editor Browser
+          (or ⋮ › <i>Customize Toolbar…</i>) puts each item on the toolbar, in ⋮ or hides it; shortcuts keep
+          working for hidden items.</li>
+    </ul>
     <p>0.3.1</p>
     <ul>
       <li>The reload button spins for at least half a second after a reload, so a page that reloads in a few
