@@ -10,7 +10,7 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 
 ## Status (18 Nov 2026)
 
-- Version 0.3.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.3.1, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
   API use. `tools/sandbox/e2e.sh` passed 31/31 for 0.2.2. For 0.3.0 (19 Nov 2026) the last full run was 43/54:
@@ -131,8 +131,3 @@ tools/sandbox/e2e.sh     # macOS: sandboxed PhpStorm (own config under /tmp/ebde
 - Prefer stable APIs; run `tools/api-check.sh` after every change.
 - Keep `editorBrowser.xml` backward compatible (old tab ids must keep reopening).
 - Add a `CoreTests` case for any change in `core/`; extend `e2e.sh` for new user-facing behaviour.
-
-## Backlog
-
-1. Per-ticket URLs with worktree-workspaces (optional dependency): a ticket remembers its site, switching tickets
-   opens it.

@@ -51,6 +51,7 @@ import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.event.DocumentEvent;
 import nl.netonic.browser.core.ConsoleLog;
 import nl.netonic.browser.core.DeviceWidths;
@@ -76,6 +77,8 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private static final int[] ZOOM_STEPS = {25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300};
   /** The reload icon, spinning in place, shown instead of a static icon while the page loads. */
   private static final Icon RELOAD_SPINNER = reloadSpinner();
+  /** Minimum time the reload button spins after a load starts, see {@link #spinUntil}. */
+  private static final int MIN_SPIN_MS = 500;
   private static final Icon DEVICE_WIDTH_ICON = IconLoader.getIcon("/icons/deviceWidth.svg", BrowserEditor.class);
   /** Evaluates to the page's best favicon URL, or {@code ""} for a page with no real origin (e.g. about:blank). */
   private static final String FAVICON_JS = """
@@ -131,6 +134,13 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
    */
   private volatile boolean sourceView;
   private volatile boolean loading;
+  /**
+   * The reload button spins at least until this time ({@link System#currentTimeMillis()}), so a page that loads in
+   * a few milliseconds (a local dev server) still shows that it reloaded.
+   */
+  private volatile long spinUntil;
+  /** The toolbar with the reload button: refreshed when the loading state changes; set once in the constructor. */
+  private @Nullable ActionToolbar navToolbar;
   private volatile boolean canGoBack;
   private volatile boolean canGoForward;
   /** The page has a dev-server client that reloads it (see {@link #LIVE_RELOAD_JS}). */
@@ -207,10 +217,12 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
       @Override
       public void onLoadingStateChange(CefBrowser b, boolean isLoading, boolean back, boolean forward) {
+        if (isLoading && !loading) spinUntil = System.currentTimeMillis() + MIN_SPIN_MS;
         loading = isLoading;
         canGoBack = back;
         canGoForward = forward;
         if (!isLoading) applyZoom();
+        onEdt(BrowserEditor.this::refreshReloadButton);
       }
 
       @Override
@@ -525,7 +537,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0));
     row.setOpaque(false);
     row.add(findField);
-    row.add(toolbar(actions));
+    row.add(toolbar(actions).getComponent());
     row.add(findCount);
     findBar.add(row, BorderLayout.CENTER);
     findBar.setBorder(JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(2, 0)));
@@ -553,6 +565,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         action("Forward", AllIcons.Actions.Forward, () -> canGoForward, () -> withCef(CefBrowser::goForward)),
         new ReloadAction(),
         ActionManager.getInstance().getAction("EditorBrowser.NewTab"));
+    navToolbar = toolbar(left);
     DefaultActionGroup right = new DefaultActionGroup(
         deviceWidthGroup(),
         action("Zoom Out", AllIcons.General.ZoomOut, () -> zoom() > ZOOM_STEPS[0], () -> zoomStep(-1)),
@@ -620,22 +633,22 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     JPanel east = new JPanel(new BorderLayout(JBUI.scale(2), 0));
     east.setOpaque(false);
     east.add(labels, BorderLayout.WEST);
-    east.add(toolbar(right), BorderLayout.CENTER);
+    east.add(toolbar(right).getComponent(), BorderLayout.CENTER);
 
     JPanel bar = new JPanel(new BorderLayout(JBUI.scale(4), 0));
     bar.setBorder(JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(2, 4)));
-    bar.add(toolbar(left), BorderLayout.WEST);
+    bar.add(navToolbar.getComponent(), BorderLayout.WEST);
     bar.add(address, BorderLayout.CENTER);
     bar.add(east, BorderLayout.EAST);
     return bar;
   }
 
-  private JComponent toolbar(DefaultActionGroup group) {
+  private ActionToolbar toolbar(DefaultActionGroup group) {
     ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar(TOOLBAR_PLACE, group, true);
     toolbar.setTargetComponent(root);
     toolbar.getComponent().setOpaque(false);
     toolbar.getComponent().setBorder(JBUI.Borders.empty());
-    return toolbar.getComponent();
+    return toolbar;
   }
 
   private void registerShortcuts() {
@@ -685,7 +698,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     Icon base = AllIcons.Actions.Refresh;
     int frameCount = 8;
     Icon[] frames = new Icon[frameCount];
-    for (int i = 0; i < frameCount; i++) frames[i] = rotated(base, 2 * Math.PI * i / frameCount);
+    // Negative: Java2D rotates clockwise for positive angles (y points down), and the Refresh icon's arrows point
+    // counter-clockwise, so the spin follows the arrows.
+    for (int i = 0; i < frameCount; i++) frames[i] = rotated(base, -2 * Math.PI * i / frameCount);
     return new AnimatedIcon(100, frames);
   }
 
@@ -711,16 +726,46 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     };
   }
 
+  /** True while the reload button shows the spinner: loading, or within {@link #MIN_SPIN_MS} of a load start. */
+  private boolean spinning() {
+    return loading || System.currentTimeMillis() < spinUntil;
+  }
+
+  /**
+   * Updates the reload button now (the toolbar's own refresh is periodic and would miss a quick load), and once
+   * more when the minimum spin time is over. UI thread only.
+   */
+  private void refreshReloadButton() {
+    if (navToolbar == null || (browser != null && browser.isDisposed())) return;
+    navToolbar.updateActionsAsync();
+    long left = spinUntil - System.currentTimeMillis();
+    if (!loading && left > 0) {
+      Timer timer = new Timer((int) left + 20, e -> refreshReloadButton());
+      timer.setRepeats(false);
+      timer.start();
+    }
+  }
+
   private final class ReloadAction extends DumbAwareAction {
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
-      withCef(c -> { if (loading) c.stopLoad(); else c.reload(); });
+      if (loading) {
+        withCef(CefBrowser::stopLoad);
+        spinUntil = 0;
+        refreshReloadButton();
+      } else {
+        // spin right away: Chromium reports the load start a moment later
+        spinUntil = System.currentTimeMillis() + MIN_SPIN_MS;
+        withCef(CefBrowser::reload);
+        refreshReloadButton();
+      }
     }
 
     @Override
     public void update(@NotNull AnActionEvent e) {
+      boolean spinning = spinning();
       e.getPresentation().setText(loading ? "Stop" : "Reload");
-      e.getPresentation().setIcon(loading ? RELOAD_SPINNER : AllIcons.Actions.Refresh);
+      e.getPresentation().setIcon(spinning ? RELOAD_SPINNER : AllIcons.Actions.Refresh);
       e.getPresentation().setEnabled(browser != null);
     }
 

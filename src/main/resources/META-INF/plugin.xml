@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.3.0</version>
+  <version>0.3.1</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -32,6 +32,12 @@
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.3.1</p>
+    <ul>
+      <li>The reload button spins for at least half a second after a reload, so a page that reloads in a few
+          milliseconds (a local dev server, reload on save) visibly reloaded; the spin follows the icon's
+          arrows.</li>
+    </ul>
     <p>0.3.0</p>
     <ul>
       <li>Device widths: a toolbar button lays the page out at a phone (390 px), tablet (768 px) or laptop
