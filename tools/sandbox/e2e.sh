@@ -293,6 +293,61 @@ contains "a page without share tags: falls back to <title>" "label No og:title: 
 contains "… and says the image is missing" "label No og:image" c popup
 c popup close >/dev/null
 
+section "10c Light / dark mode"
+c closedialogs >/dev/null
+c open "$SITE/scheme.html" >/dev/null
+until_has 15 "* browser 'EB Scheme " c tabs
+system=$(c tabs | sed -n "s/^\* browser 'EB Scheme \([a-z]*\)'.*/\1/p")
+more "Color Scheme" "Dark"
+contains "⋮ › Color Scheme › Dark: the page sees prefers-color-scheme: dark" "* browser 'EB Scheme dark'" c tabs
+contains "… and a Dark label shows" "schemeLabel Dark" c state
+c js "document.title='EB marker'; location.href='/scheme.html?again'" >/dev/null
+contains "it stays dark on the next page" "* browser 'EB Scheme dark'" c tabs
+more "Color Scheme" "Light"
+contains "Light: the page sees light" "* browser 'EB Scheme light'" c tabs
+contains "… label Light" "schemeLabel Light" c state
+more "Color Scheme" "System"
+contains "System: the page sees the system's again ($system)" "* browser 'EB Scheme $system'" c tabs
+contains "… and the label is gone" "schemeLabel (hidden)" c state
+contains "a page without a background of its own shows white behind it" "canvas #ffffff" c state
+c open "$SITE/both.html" >/dev/null
+until_has 15 "* browser 'EB Both'" c tabs
+contains "a page in color-scheme light dark: white in light" "canvas #ffffff" c state
+more "Color Scheme" "Dark"
+contains "… and Chromium's dark canvas when set to Dark" "canvas #121212" c state
+c focustab "EB Scheme $system" >/dev/null
+# left on Dark for the restart check (section 11)
+more "Color Scheme" "Dark"
+until_has 10 "* browser 'EB Scheme dark'" c tabs
+
+section "10d Clear site data"
+c open "$SITE/storage.html" >/dev/null
+until_has 15 "* browser 'EB Storage " c tabs
+c js "document.cookie='eb=1; path=/'; localStorage.setItem('eb', '1'); location.reload()" >/dev/null
+contains "the page set a cookie and a localStorage value" "* browser 'EB Storage cookie=1 local=1'" c tabs
+more "Clear Site Data"
+contains "⋮ › Clear Site Data deletes both and reloads" "* browser 'EB Storage cookie=- local=-'" c tabs
+
+section "10e HTTP basic auth"
+c closedialogs >/dev/null
+c open "$SITE/auth/" >/dev/null
+contains "a site asking for basic auth gets a Sign In dialog" "label 127.0.0.1:$PORT asks for a username and password" c auth
+contains "… naming the realm" "EB Staging" c auth
+contains "… and that http sends the password readable" "sent readable" c auth
+c auth cancel >/dev/null
+contains "Cancel leaves a Sign-in needed page" "* browser 'Sign-in needed'" c tabs
+c js "location.reload()" >/dev/null
+until_has 15 "asks for a username" c auth
+[[ "$(c auth)" != *"didn't accept"* ]] && pass "after Cancel it asks again, without an error" || fail "after Cancel it asks again, without an error" "$(c auth | tr '\n' ' ')"
+c auth eb wrong >/dev/null
+contains "a wrong password: it asks again, saying so" "didn't accept that username or password" c auth
+c auth eb secret >/dev/null
+contains "the right one loads the page" "* browser 'EB Signed In'" c tabs
+c open "$SITE/auth/" >/dev/null
+until_has 15 "* browser 'EB Signed In'" c tabs
+[[ "$(c auth)" == "no auth dialog" ]] && pass "another tab on the site doesn't ask again (same session)" \
+  || fail "another tab on the site doesn't ask again" "$(c auth | tr '\n' ' ')"
+
 section "11 Restart"
 before=$(c tabs | grep -c "browser '")
 c layout find=toolbar >/dev/null
@@ -302,6 +357,10 @@ contains "browser tabs reopen after a restart ($before)" "browser 'EB" c tabs
 contains "the source tab reopens as page source" "browser 'view-source:127.0.0.1:$PORT/third.html' view-source:" c tabs
 contains "the HTML file tab reopens on the file" "browser 'EB Local' file://" c tabs
 contains "the toolbar layout is kept (Find in Page on the toolbar)" "button 'Find in Page'" c buttons
+c focustab "EB Scheme dark" >/dev/null
+until_has 15 "* browser 'EB Scheme dark'" c tabs
+c js "document.title='EB marker'; location.reload()" >/dev/null
+contains "a tab set to Dark is still dark after the restart" "* browser 'EB Scheme dark'" c tabs
 c layout default >/dev/null
 after=$(c tabs | grep -c "browser '")
 [ "$after" = "$before" ] && pass "same number of browser tabs ($after)" || fail "same number of browser tabs" "$before → $after"

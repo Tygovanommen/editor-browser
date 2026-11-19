@@ -34,9 +34,11 @@ public final class ToolbarLayout {
   public enum Item {
     NEW_TAB("newTab", "New tab", Place.TOOLBAR),
     DEVICE_WIDTH("deviceWidth", "Device width", Place.MENU),
+    COLOR_SCHEME("colorScheme", "Light / dark mode", Place.MENU),
     ZOOM("zoom", "Zoom in / out", Place.MENU),
     FIND("find", "Find in page", Place.MENU),
     SHARE_PREVIEW("sharePreview", "Share preview", Place.MENU),
+    CLEAR_SITE_DATA("clearSiteData", "Clear site data", Place.MENU),
     OPEN_EXTERNAL("openExternal", "Open in default browser", Place.MENU),
     DEVTOOLS("devTools", "DevTools", Place.TOOLBAR);
 

@@ -118,9 +118,11 @@ public final class BrowserConfigurable implements Configurable {
     return switch (item) {
       case NEW_TAB -> AllIcons.General.Add;
       case DEVICE_WIDTH -> IconLoader.getIcon("/icons/deviceWidth.svg", BrowserConfigurable.class);
+      case COLOR_SCHEME -> IconLoader.getIcon("/icons/colorScheme.svg", BrowserConfigurable.class);
       case ZOOM -> AllIcons.General.ZoomIn;
       case FIND -> AllIcons.Actions.Find;
       case SHARE_PREVIEW -> AllIcons.Actions.Share;
+      case CLEAR_SITE_DATA -> AllIcons.Actions.ClearCash;
       case OPEN_EXTERNAL -> AllIcons.Ide.External_link_arrow;
       case DEVTOOLS -> AllIcons.Toolwindows.ToolWindowInspection;
     };

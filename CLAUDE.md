@@ -10,7 +10,7 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 
 ## Status (19 Nov 2026)
 
-- Version 0.4.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.5.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
   API use. `tools/sandbox/e2e.sh` passed 31/31 for 0.2.2. For 0.3.0 (19 Nov 2026) the last full run was 43/54:
@@ -22,6 +22,10 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 - 0.4.0 (toolbar layout + Share Preview, 19 Nov 2026): full `e2e.sh` 72/75. The 3 failures: typing into the
   address bar (focus), "the source tab reopens as page source" (as above), and a Share Preview check that was a
   `pipefail` bug in the test itself (fixed, passes on its own; the full suite wasn't rerun).
+- 0.5.0 (light / dark mode, clear site data, basic auth, page background fix, 19 Nov 2026): full `e2e.sh` 84/96;
+  all 23 new checks passed (incl. Dark kept after a restart). The 12 failures: 10 keyboard checks + their
+  follow-ons (`focus null`), "the source tab reopens as page source" (as above), and "⋮ › Zoom In: back to 100%"
+  (timing: the same steps by hand work).
 - `EditorEmptyTextProvider`/`EditorEmptyTextSink` (`impl` package) are `@ApiStatus.Internal` with no stable
   replacement; don't reintroduce an empty-editor-placeholder hint through them, `api-check.sh` will flag it.
 - Not verified yet: building against 2026.2.3 in the release workflow (the Linux tarball's JCEF folder is matched
@@ -32,7 +36,8 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 - A tab is a `BrowserFile` (contentless `VirtualFile`) in `BrowserFileSystem`, protocol `editor-browser://<id>`,
   id = 12 hex chars. Being a real file system is what lets PhpStorm reopen tabs after a restart: it saves open
   files by URL and finds them again through `findFileByPath`, which only answers for ids `BrowserStore` knows.
-- `BrowserStore` (app service, `editorBrowser.xml`): per id the current URL, page title, zoom % and device width, plus the
+- `BrowserStore` (app service, `editorBrowser.xml`): per id the current URL, page title, zoom %, device width and color
+  scheme (`schemes`, absent = system), plus the
   recent typed addresses (15). Entries are not removed when a tab closes (closing a project closes its tabs too,
   which would lose them for the restart); the oldest are pruned past 200.
 - Split Right on a browser tab gives a second `BrowserEditor` (second Chromium) for the same file / id: both write
@@ -69,6 +74,23 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   `BrowserStore.width` (CSS px, absent = full); the browser component sits in a `Viewport` panel that centres it at
   `core/DeviceWidths.frameWidth` (width × zoom, clamped to the tab) — a plain resize, so the page's media queries and
   `innerWidth` see the preset; `setZoom` re-lays it out. A "390 px" label left of the zoom label resets it.
+  DevTools protocol: `devTools(method, params)` (`CefBrowser.getDevToolsClient`, null until Chromium created the
+  browser, hence `onAfterCreated`). Color scheme (`Item.COLOR_SCHEME`, dropdown like Device Width, `core/ColorScheme`):
+  `Emulation.setEmulatedMedia` `prefers-color-scheme`, set again on every main-frame load start; "Dark" / "Light"
+  label left of the width label resets it. Clear site data (`Item.CLEAR_SITE_DATA`, http(s) only, `Urls.origin`):
+  `Storage.clearDataForOrigin` (all types) + `Network.clearBrowserCache`, then `reloadIgnoreCache`, status bar text.
+  Page backdrop: off-screen, Chromium leaves the canvas transparent and ignores
+  `Emulation.setDefaultBackgroundColorOverride`, so `setCanvas` colours the Swing components behind the page with
+  the page's CSS `Canvas` colour (`Js.CANVAS_COLOR`, read on load end and after a scheme change: white, or #121212
+  for a dark color-scheme page). Don't use `JBCefBrowser.setPageBackgroundColor`: it sets `body`'s inline style
+  on every load, which overrides the page's own background.
+  HTTP basic auth (`BasicAuth`): JCEF's default out-of-process mode never calls `getAuthCredentials`, so a request
+  handler's `getResourceRequestHandler` watches main-frame loads for a 401 with a `Basic` challenge
+  (`core/HttpAuth`), asks in a Sign In dialog (or uses a login remembered in `PasswordSafe`, key origin + realm),
+  keeps the login per origin for the session and adds it as an `Authorization` header (`onBeforeResourceLoad`) to
+  every request to that origin, then reloads. A 401 for a request that carried the login = rejected (dialog says
+  so). With a resource handler on the request, an unanswered 401 becomes `ERR_INVALID_AUTH_CREDENTIALS` (an empty
+  error page, not the site's 401 body): Cancel fills it in with `Js.signInCancelledPage`. No Digest.
   Share preview (`ToolbarLayout.Item.SHARE_PREVIEW`, in ⋮ by default; `openSharePreview`): `core/SharePreview.SCRIPT`
   reads the page's `<meta property|name>` tags, `<title>`, canonical link and base URL as `key\tvalue` lines;
   `SharePreview.card` applies the apps' fallbacks (og: → twitter: → `<title>` / meta description) and lists the
@@ -125,9 +147,11 @@ tools/sandbox/e2e.sh     # macOS: sandboxed PhpStorm (own config under /tmp/ebde
   PhpStorm's bundled JBR (no `jar` tool: `build.sh` falls back to `zip`).
 - Classpath = `lib/` + the JCEF plugin's `lib/` (`plugins/*jcef*/lib`, `jcef-plugin` on macOS 2026.3).
 - Sandbox (`tools/sandbox/`): `demo.sh` starts PhpStorm with its own config/system/plugins and serves
-  `/tmp/ebdemo/site` on `127.0.0.1:8765` (`EBDEMO_PORT`); `cmd.sh <command>` talks to the helper plugin
+  `/tmp/ebdemo/site` on `127.0.0.1:8765` (`EBDEMO_PORT`; `server.py`, basic auth `eb` / `secret` on `/auth/`); `cmd.sh <command>` talks to the helper plugin
   (`helper/Commands.java`: `open`, `tabs`, `state`, `js`, `click x y`, `rclick x y` (Chromium's context menu),
   `buttons` (the tab's visible toolbar buttons), `layout default | item=place …` (set the toolbar layout),
+  `auth [user password | cancel]` (the Sign In dialog's text, or fill in / cancel it), `cdp <method> [json]` (a
+  DevTools protocol call), `loaderrors` (record / print Chromium load errors),
   `menu [label]` (list / pick an item of the open list popup), `dump`, `stroke "meta L"`, `action <id>`, `type`,
   `key`, `file`, `select`, `shot`, `quit`; `demo.sh --probe` reloads it without a restart). JCEF runs off-screen
   (OSR) there, so `shot` (Swing paint) includes the page. A script `click()` on a `target=_blank` link is blocked

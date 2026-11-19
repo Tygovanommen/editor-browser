@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import nl.netonic.browser.core.ColorScheme;
 import nl.netonic.browser.core.DeviceWidths;
 import nl.netonic.browser.core.ToolbarLayout;
 import nl.netonic.browser.core.Urls;
@@ -16,7 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Per tab id: the current URL, page title, zoom and device width; plus the recently typed addresses. Saved in
+ * Per tab id: the current URL, page title, zoom, device width and color scheme; plus the recently typed addresses. Saved in
  * {@code editorBrowser.xml}, so tabs PhpStorm reopens after a restart load their last page.
  * Entries are not removed when a tab closes (closing a project closes its tabs too); the oldest are dropped past
  * {@link #MAX_TABS}.
@@ -32,6 +33,8 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     public Map<String, String> zoom = new LinkedHashMap<>();
     /** Device width preset in CSS px; absent = full width. */
     public Map<String, String> widths = new LinkedHashMap<>();
+    /** {@link ColorScheme#key} forced for the tab's pages; absent = the system's. */
+    public Map<String, String> schemes = new LinkedHashMap<>();
     public List<String> recent = new ArrayList<>();
     public boolean autoOpenDevServer = true;
     public boolean reloadOnSave = true;
@@ -104,6 +107,15 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
   public synchronized void setWidth(String id, int cssWidth) {
     if (cssWidth <= 0) data.widths.remove(id);
     else data.widths.put(id, Integer.toString(cssWidth));
+  }
+
+  public synchronized ColorScheme colorScheme(String id) {
+    return ColorScheme.parse(data.schemes.get(id));
+  }
+
+  public synchronized void setColorScheme(String id, ColorScheme scheme) {
+    if (scheme == ColorScheme.SYSTEM) data.schemes.remove(id);
+    else data.schemes.put(id, scheme.key);
   }
 
   public synchronized List<String> recent() {
@@ -179,6 +191,7 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
       data.titles.remove(id);
       data.zoom.remove(id);
       data.widths.remove(id);
+      data.schemes.remove(id);
     }
   }
 }

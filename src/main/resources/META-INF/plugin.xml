@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -15,6 +15,11 @@
       <li>Back, forward, reload, an address bar, zoom (handy in a narrow split) and DevTools in every tab; the
           page's own favicon becomes the tab icon.</li>
       <li>Device widths: see the page at a phone, tablet or laptop width, centred in the tab.</li>
+      <li>Light / dark mode: check a site's dark mode (<code>prefers-color-scheme</code>) per tab, without
+          switching your OS.</li>
+      <li>Clear site data: the page's cookies, storage and cache gone in one click, for a fresh first visit.</li>
+      <li>Password-protected sites (HTTP basic auth, e.g. a staging server) ask for a login in a Sign In dialog,
+          optionally remembered in the IDE's password store.</li>
       <li>Saving a project file reloads the tabs on a local page (<code>localhost</code>, <code>*.test</code>, …);
           pages with their own hot reload (Vite, webpack) are left to it for front-end files.</li>
       <li>Find in page (⌘F), and a toolbar badge counting the page's console errors.</li>
@@ -35,6 +40,20 @@
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.5.0</p>
+    <ul>
+      <li>Light / dark mode: ⋮ › <i>Color Scheme</i> › <i>Light</i> or <i>Dark</i> makes the page see that
+          <code>prefers-color-scheme</code>, to check a site's dark mode without switching your OS; per tab, kept
+          after a restart. A "Dark" label in the toolbar goes back to the system's.</li>
+      <li>Clear Site Data (⋮): deletes the page's cookies and storage (local / session storage, IndexedDB, service
+          workers, Cache Storage), empties the browser cache and reloads.</li>
+      <li>HTTP basic auth: a site that asks for a username and password (e.g. a staging server) gets a Sign In
+          dialog; the login is used for that site until the IDE restarts, or remembered in the IDE's password
+          store. Digest authentication isn't supported.</li>
+      <li>Fix: pages that set their background on <code>body</code> (e.g. dark sites) showed a white body; the
+          page's own background now wins, pages without one are white, and pages in a dark color scheme get
+          Chromium's dark canvas.</li>
+    </ul>
     <p>0.4.0</p>
     <ul>
       <li>Share Preview: shows the link card the page gets when its URL is pasted into Slack, X, LinkedIn or

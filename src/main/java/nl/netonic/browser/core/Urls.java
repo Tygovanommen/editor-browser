@@ -143,6 +143,27 @@ public final class Urls {
   }
 
   /**
+   * The page's origin as Chromium writes it ({@code http://localhost:8000}, {@code https://example.com}: lower-case
+   * host, default port left out), or null for anything but an http(s) page (a source view counts as its page).
+   */
+  public static String origin(String url) {
+    if (url == null) return null;
+    String s = url.strip();
+    if (isViewSource(s)) s = s.substring(VIEW_SOURCE.length());
+    try {
+      URI uri = URI.create(s);
+      String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+      String host = uri.getHost();
+      if (host == null || !(scheme.equals("http") || scheme.equals("https"))) return null;
+      int port = uri.getPort();
+      boolean defaultPort = port < 0 || (scheme.equals("http") && port == 80) || (scheme.equals("https") && port == 443);
+      return scheme + "://" + host.toLowerCase(Locale.ROOT) + (defaultPort ? "" : ":" + port);
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+  }
+
+  /**
    * {@code host:port} for matching the same address across runs, or null when {@code url} has no host. Loopback
    * names ({@code 127.0.0.1}, {@code [::1]}) count as {@code localhost}: the same dev server either way.
    */

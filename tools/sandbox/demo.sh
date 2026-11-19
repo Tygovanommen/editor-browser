@@ -51,7 +51,8 @@ stop_server() {
 
 start_server() {
   stop_server
-  nohup python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$ROOT/site" >"$ROOT/server.log" 2>&1 &
+  # a plain file server, with HTTP basic auth on /auth/ (tools/sandbox/server.py)
+  nohup python3 -I "$PWD/tools/sandbox/server.py" "$PORT" "$ROOT/site" >"$ROOT/server.log" 2>&1 &
   echo $! > "$ROOT/server.pid"
 }
 
@@ -130,6 +131,36 @@ cat > "$ROOT/site/share.html" <<EOF
 <meta property="og:site_name" content="EB Site">
 <meta name="twitter:card" content="summary_large_image">
 </head><body><h1>Share</h1></body></html>
+EOF
+# HTTP basic auth (server.py: user eb, password secret)
+mkdir -p "$ROOT/site/auth"
+cat > "$ROOT/site/auth/index.html" <<'EOF'
+<!doctype html>
+<html><head><title>EB Signed In</title></head><body><h1>Behind basic auth</h1></body></html>
+EOF
+# light / dark mode: the title says which prefers-color-scheme the page sees, and follows changes
+cat > "$ROOT/site/scheme.html" <<'EOF'
+<!doctype html>
+<html><head><title>EB Scheme</title></head><body><h1>Color scheme</h1>
+<script>
+  var dark = matchMedia('(prefers-color-scheme: dark)');
+  function show() { document.title = 'EB Scheme ' + (dark.matches ? 'dark' : 'light'); }
+  dark.addEventListener('change', show); show();
+</script></body></html>
+EOF
+# a page that supports both schemes: Chromium draws its dark canvas behind it when it is dark
+cat > "$ROOT/site/both.html" <<'EOF'
+<!doctype html>
+<html><head><meta name="color-scheme" content="light dark"><title>EB Both</title></head><body><h1>Both</h1></body></html>
+EOF
+# clear site data: the title shows a cookie and a localStorage value the page set before
+cat > "$ROOT/site/storage.html" <<'EOF'
+<!doctype html>
+<html><head><title>EB Storage</title></head><body><h1>Storage</h1>
+<script>
+  var c = /(?:^|; )eb=([^;]*)/.exec(document.cookie);
+  document.title = 'EB Storage cookie=' + (c ? c[1] : '-') + ' local=' + (localStorage.getItem('eb') || '-');
+</script></body></html>
 EOF
 echo "http://127.0.0.1:$PORT/second.html" > "$ROOT/project/links.md"
 # an HTML file of the project (Open In › Browser Tab); its script, loaded by a relative path, sets the title

@@ -25,6 +25,7 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.wm.StatusBar;
 import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.JBColor;
@@ -37,6 +38,7 @@ import com.intellij.ui.jcef.JBCefBrowserBase;
 import com.intellij.ui.jcef.JBCefJSQuery;
 import com.intellij.util.ui.JBUI;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.FlowLayout;
@@ -51,6 +53,7 @@ import java.awt.event.MouseEvent;
 import java.beans.PropertyChangeListener;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import javax.swing.Icon;
@@ -60,6 +63,7 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.event.DocumentEvent;
+import nl.netonic.browser.core.ColorScheme;
 import nl.netonic.browser.core.ConsoleLog;
 import nl.netonic.browser.core.DeviceWidths;
 import nl.netonic.browser.core.Js;
@@ -71,6 +75,7 @@ import nl.netonic.browser.core.ToolbarLayout.Place;
 import nl.netonic.browser.core.Urls;
 import org.cef.CefSettings;
 import org.cef.browser.CefBrowser;
+import org.cef.browser.CefDevToolsClient;
 import org.cef.browser.CefFrame;
 import org.cef.callback.CefContextMenuParams;
 import org.cef.callback.CefMenuModel;
@@ -78,6 +83,9 @@ import org.cef.handler.CefContextMenuHandlerAdapter;
 import org.cef.handler.CefDisplayHandlerAdapter;
 import org.cef.handler.CefLifeSpanHandlerAdapter;
 import org.cef.handler.CefLoadHandlerAdapter;
+import org.cef.handler.CefRequestHandlerAdapter;
+import org.cef.handler.CefResourceRequestHandler;
+import org.cef.misc.BoolRef;
 import org.cef.network.CefRequest;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -91,6 +99,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   /** Minimum time the reload button spins after a load starts, see {@link #spinUntil}. */
   private static final int MIN_SPIN_MS = 500;
   private static final Icon DEVICE_WIDTH_ICON = IconLoader.getIcon("/icons/deviceWidth.svg", BrowserEditor.class);
+  private static final Icon COLOR_SCHEME_ICON = IconLoader.getIcon("/icons/colorScheme.svg", BrowserEditor.class);
   /** Evaluates to the page's best favicon URL, or {@code ""} for a page with no real origin (e.g. about:blank). */
   private static final String FAVICON_JS = """
       (function () {
@@ -125,6 +134,8 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private final JBLabel zoomLabel = new JBLabel();
   /** "390 px" left of the zoom label when a device width is set; click for full width. */
   private final JBLabel widthLabel = new JBLabel();
+  /** "Dark" / "Light" left of the width label when the color scheme is forced; click for the system's. */
+  private final JBLabel schemeLabel = new JBLabel();
   /** Holds the page: the full tab, or a column of the device width (at the zoom) centred in it. */
   private final JPanel viewport = new Viewport();
   /** Red error icon + count when the page logged console errors; click for DevTools. */
@@ -137,6 +148,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private final @Nullable JBCefBrowser browser;
   private @Nullable JBCefJSQuery findCountQuery;
   private @Nullable JBCefJSQuery shareQuery;
+  private @Nullable JBCefJSQuery canvasQuery;
   /** Share Preview: the button it was opened from (null: from a shortcut / the sandbox), and the popover itself. */
   private @Nullable Component shareAnchor;
   private @Nullable JBPopup sharePopup;
@@ -181,8 +193,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
     browser = JBCefBrowser.createBuilder().setUrl(url).build();
     Disposer.register(this, browser);
-    // pages without a background of their own are white, as in any browser (not the IDE theme's dark grey)
-    browser.setPageBackgroundColor("white");
+    // Not browser.setPageBackgroundColor("white"): that sets body's inline style on every load, which beats the
+    // page's own CSS (a dark site got a white body). See setCanvas instead.
+    setCanvas(Color.WHITE);
     CefBrowser cef = browser.getCefBrowser();
     browser.getJBCefClient().addDisplayHandler(new CefDisplayHandlerAdapter() {
       @Override
@@ -237,6 +250,13 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       return null;
     });
     Disposer.register(this, shareQuery);
+    canvasQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
+    canvasQuery.addHandler(result -> {
+      int rgb = Js.parseRgb(result);
+      if (rgb >= 0) onEdt(() -> setCanvas(new Color(rgb)));
+      return null;
+    });
+    Disposer.register(this, canvasQuery);
     browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
       @Override
       public void onLoadingStateChange(CefBrowser b, boolean isLoading, boolean back, boolean forward) {
@@ -255,6 +275,8 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         console.clear();
         pageReloadsItself = false;
         onEdt(BrowserEditor.this::updateErrorLabel);
+        // the emulation outlives navigations; set again in case Chromium started a new renderer for this page
+        if (colorScheme() != ColorScheme.SYSTEM) applyColorScheme();
       }
 
       @Override
@@ -262,15 +284,48 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         if (frame == null || !frame.isMain()) return;
         b.executeJavaScript(faviconQuery.inject(FAVICON_JS), b.getURL(), 0);
         b.executeJavaScript(liveReloadQuery.inject(LIVE_RELOAD_JS), b.getURL(), 0);
+        readCanvas();
         onEdt(() -> { if (findBar.isVisible()) runFind(true, false); });
       }
     }, cef);
     browser.getJBCefClient().addLifeSpanHandler(new CefLifeSpanHandlerAdapter() {
       @Override
+      public void onAfterCreated(CefBrowser b) {
+        // the DevTools protocol is there from now on (see devTools)
+        if (colorScheme() != ColorScheme.SYSTEM) applyColorScheme();
+      }
+
+      @Override
       public boolean onBeforePopup(CefBrowser b, CefFrame frame, String targetUrl, String targetFrameName) {
         // target="_blank" links and window.open(): a new editor tab instead of a separate window
         if (targetUrl != null && !targetUrl.isBlank()) onEdt(() -> BrowserTabs.open(project, targetUrl, true));
         return true;
+      }
+    }, cef);
+    browser.getJBCefClient().addRequestHandler(new CefRequestHandlerAdapter() {
+      @Override
+      public CefResourceRequestHandler getResourceRequestHandler(CefBrowser b, CefFrame frame, CefRequest request,
+          boolean isNavigation, boolean isDownload, String requestInitiator, BoolRef disableDefaultHandling) {
+        // HTTP basic auth (e.g. a staging server): without this the page just shows the site's 401
+        return BasicAuth.handlerFor(project, frame, request, isNavigation, new BasicAuth.Tab() {
+          @Override
+          public void reload() {
+            withCef(CefBrowser::reload);
+          }
+
+          @Override
+          public void signInCancelled(String site, String realm) {
+            // now, and again in case Chromium shows its error page a moment later (the script only acts on it)
+            String script = Js.signInCancelledPage(site, realm);
+            Runnable show = () -> withCef(c -> c.executeJavaScript(script, c.getURL(), 0));
+            show.run();
+            for (int delay : new int[] {500, 1500}) {
+              Timer timer = new Timer(delay, e -> show.run());
+              timer.setRepeats(false);
+              timer.start();
+            }
+          }
+        });
       }
     }, cef);
     browser.getJBCefClient().addContextMenuHandler(new CefContextMenuHandlerAdapter() {
@@ -442,10 +497,22 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
    * ticked; shown only where the {@link ToolbarLayout} puts it.
    */
   private DefaultActionGroup deviceWidthGroup(Place where) {
-    DefaultActionGroup group = new DefaultActionGroup("Device Width", true) {
+    DefaultActionGroup group = placedGroup("Device Width", Item.DEVICE_WIDTH, where);
+    group.getTemplatePresentation().setIcon(DEVICE_WIDTH_ICON);
+    group.add(option("Full Width", () -> deviceWidth() == DeviceWidths.FULL, () -> setDeviceWidth(DeviceWidths.FULL)));
+    group.addSeparator();
+    for (DeviceWidths.Preset p : DeviceWidths.PRESETS) {
+      group.add(option(p.text(), () -> deviceWidth() == p.width(), () -> setDeviceWidth(p.width())));
+    }
+    return group;
+  }
+
+  /** A dropdown / submenu item of the toolbar, shown only where the {@link ToolbarLayout} puts it. */
+  private DefaultActionGroup placedGroup(String text, Item item, Place where) {
+    return new DefaultActionGroup(text, true) {
       @Override
       public void update(@NotNull AnActionEvent e) {
-        e.getPresentation().setVisible(isPlaced(Item.DEVICE_WIDTH, where));
+        e.getPresentation().setVisible(isPlaced(item, where));
       }
 
       @Override
@@ -453,23 +520,19 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         return ActionUpdateThread.EDT;
       }
     };
-    group.getTemplatePresentation().setIcon(DEVICE_WIDTH_ICON);
-    group.add(widthOption("Full Width", DeviceWidths.FULL));
-    group.addSeparator();
-    for (DeviceWidths.Preset p : DeviceWidths.PRESETS) group.add(widthOption(p.text(), p.width()));
-    return group;
   }
 
-  private DumbAwareToggleAction widthOption(String text, int cssWidth) {
+  /** One choice of such a dropdown, ticked while {@code selected}. */
+  private static DumbAwareToggleAction option(String text, BooleanSupplier selected, Runnable select) {
     DumbAwareToggleAction option = new DumbAwareToggleAction(text) {
       @Override
       public boolean isSelected(@NotNull AnActionEvent e) {
-        return deviceWidth() == cssWidth;
+        return selected.getAsBoolean();
       }
 
       @Override
       public void setSelected(@NotNull AnActionEvent e, boolean state) {
-        setDeviceWidth(cssWidth);
+        select.run();
       }
 
       @Override
@@ -477,9 +540,100 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         return ActionUpdateThread.EDT;
       }
     };
-    // a toggle keeps its popup open by default; a width is picked once, so close the menu like a plain item
+    // a toggle keeps its popup open by default; a choice is picked once, so close the menu like a plain item
     option.getTemplatePresentation().setKeepPopupOnPerform(KeepPopupOnPerform.Never);
     return option;
+  }
+
+  // --- light / dark mode (what the page sees as prefers-color-scheme)
+
+  private ColorScheme colorScheme() {
+    return store.colorScheme(file.id());
+  }
+
+  private void setColorScheme(ColorScheme scheme) {
+    store.setColorScheme(file.id(), scheme);
+    applyColorScheme();
+    updateSchemeLabel();
+  }
+
+  private void applyColorScheme() {
+    // the page's canvas follows the scheme when it supports both (color-scheme: light dark)
+    devTools("Emulation.setEmulatedMedia", colorScheme().emulatedMediaParams()).thenRun(this::readCanvas);
+  }
+
+  /**
+   * The colour behind the page. Off-screen, Chromium leaves the canvas transparent (and ignores the DevTools
+   * protocol's background override), so where a page has no background of its own the Swing component shows: set
+   * to the page's CSS {@code Canvas} colour ({@link Js#CANVAS_COLOR}, read after each load and color scheme
+   * change), white for most pages and dark for a page in a dark color scheme, as Chrome draws it.
+   */
+  private void setCanvas(Color color) {
+    if (browser == null) return;
+    for (Component c : new Component[] {browser.getComponent(), browser.getCefBrowser().getUIComponent()}) {
+      if (c == null || color.equals(c.getBackground())) continue;
+      c.setBackground(color);
+      c.repaint();
+    }
+  }
+
+  private void readCanvas() {
+    JBCefJSQuery query = canvasQuery;
+    if (query != null) withCef(c -> c.executeJavaScript(query.inject(Js.CANVAS_COLOR), c.getURL(), 0));
+  }
+
+  private void updateSchemeLabel() {
+    ColorScheme scheme = colorScheme();
+    schemeLabel.setText(scheme.text);
+    schemeLabel.setVisible(scheme != ColorScheme.SYSTEM);
+  }
+
+  /** Dropdown (on the toolbar) or submenu (in ⋮): System, Light, Dark, the current one ticked. */
+  private DefaultActionGroup colorSchemeGroup(Place where) {
+    DefaultActionGroup group = placedGroup("Color Scheme", Item.COLOR_SCHEME, where);
+    group.getTemplatePresentation().setIcon(COLOR_SCHEME_ICON);
+    group.add(option("System", () -> colorScheme() == ColorScheme.SYSTEM, () -> setColorScheme(ColorScheme.SYSTEM)));
+    group.addSeparator();
+    group.add(option("Light", () -> colorScheme() == ColorScheme.LIGHT, () -> setColorScheme(ColorScheme.LIGHT)));
+    group.add(option("Dark", () -> colorScheme() == ColorScheme.DARK, () -> setColorScheme(ColorScheme.DARK)));
+    return group;
+  }
+
+  // --- clear site data
+
+  /**
+   * Deletes the page's site data (cookies, local / session storage, IndexedDB, service workers, Cache Storage) and
+   * empties the HTTP cache, then reloads: a fresh first visit, e.g. logged out. Only for http(s) pages.
+   */
+  private void clearSiteData() {
+    String origin = Urls.origin(file.url());
+    if (origin == null) return;
+    devTools("Storage.clearDataForOrigin", "{\"origin\":\"" + origin + "\",\"storageTypes\":\"all\"}")
+        .thenCompose(r -> devTools("Network.clearBrowserCache", null))
+        .whenComplete((r, error) -> onEdt(() -> {
+          if (error != null) {
+            status("Couldn't clear the site data of " + origin + ": " + error.getMessage());
+            return;
+          }
+          spinUntil = System.currentTimeMillis() + MIN_SPIN_MS;
+          withCef(CefBrowser::reloadIgnoreCache);
+          refreshReloadButton();
+          status("Cleared the cookies, storage and cache of " + origin);
+        }));
+  }
+
+  private void status(String text) {
+    if (!project.isDisposed()) StatusBar.Info.set(text, project);
+  }
+
+  /**
+   * Runs a DevTools protocol method on this tab's page; fails while Chromium hasn't created the browser yet (see
+   * {@code onAfterCreated}).
+   */
+  private CompletableFuture<String> devTools(String method, @Nullable String paramsJson) {
+    CefDevToolsClient client = browser == null || browser.isDisposed() ? null : browser.getCefBrowser().getDevToolsClient();
+    if (client == null) return CompletableFuture.failedFuture(new IllegalStateException("the page isn't ready"));
+    return paramsJson == null ? client.executeDevToolsMethod(method) : client.executeDevToolsMethod(method, paramsJson);
   }
 
   // --- find in page (Chromium highlights and steps through the matches; JCEF reports no count, see Js.countMatches)
@@ -634,8 +788,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     navToolbar = toolbar(left);
     DefaultActionGroup right = new DefaultActionGroup();
     right.add(deviceWidthGroup(Place.TOOLBAR));
+    right.add(colorSchemeGroup(Place.TOOLBAR));
     for (Item item : Item.values()) {
-      if (item == Item.NEW_TAB || item == Item.DEVICE_WIDTH) continue;
+      if (isGroupOrNewTab(item)) continue;
       right.addAll(optionals(item, Place.TOOLBAR));
     }
     right.add(moreGroup());
@@ -682,6 +837,16 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       }
     });
     updateWidthLabel();
+    schemeLabel.setToolTipText("Pages see this color scheme (prefers-color-scheme); click for the system's");
+    schemeLabel.setForeground(JBColor.GRAY);
+    schemeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+    schemeLabel.addMouseListener(new MouseAdapter() {
+      @Override
+      public void mouseClicked(MouseEvent e) {
+        setColorScheme(ColorScheme.SYSTEM);
+      }
+    });
+    updateSchemeLabel();
     errorLabel.setIcon(AllIcons.General.Error);
     errorLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
     errorLabel.addMouseListener(new MouseAdapter() {
@@ -694,6 +859,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     JPanel labels = new JPanel(new FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0));
     labels.setOpaque(false);
     labels.add(errorLabel);
+    labels.add(schemeLabel);
     labels.add(widthLabel);
     labels.add(zoomLabel);
     JPanel east = new JPanel(new BorderLayout(JBUI.scale(2), 0));
@@ -719,8 +885,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     more.add(optional(Item.NEW_TAB, Place.MENU));
     more.addSeparator();
     more.add(deviceWidthGroup(Place.MENU));
+    more.add(colorSchemeGroup(Place.MENU));
     for (Item item : Item.values()) {
-      if (item == Item.NEW_TAB || item == Item.DEVICE_WIDTH) continue;
+      if (isGroupOrNewTab(item)) continue;
       more.addAll(optionals(item, Place.MENU));
       if (item == Item.ZOOM) more.addSeparator();
     }
@@ -728,6 +895,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     more.add(action("Customize Toolbar…", null, () -> true,
         () -> ShowSettingsUtil.getInstance().showSettingsDialog(project, BrowserConfigurable.class)));
     return more;
+  }
+
+  /** New Tab sits left of the address bar; Device Width and Color Scheme are dropdowns, added first. */
+  private static boolean isGroupOrNewTab(Item item) {
+    return item == Item.NEW_TAB || item == Item.DEVICE_WIDTH || item == Item.COLOR_SCHEME;
   }
 
   private boolean isPlaced(Item item, Place where) {
@@ -787,11 +959,18 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
           return ActionUpdateThread.EDT;
         }
       });
+      case CLEAR_SITE_DATA -> {
+        DumbAwareAction a = action("Clear Site Data", AllIcons.Actions.ClearCash, shown,
+            () -> browser != null && Urls.origin(file.url()) != null, this::clearSiteData);
+        a.getTemplatePresentation().setDescription(
+            "Deletes this site's cookies and storage, empties the browser cache and reloads");
+        yield List.of(a);
+      }
       case OPEN_EXTERNAL -> List.of(action("Open in Default Browser", AllIcons.Ide.External_link_arrow, shown, () -> true,
           () -> BrowserUtil.browse(file.url())));
       case DEVTOOLS -> List.of(withKeys(
           action("Open DevTools", AllIcons.Toolwindows.ToolWindowInspection, shown, () -> browser != null, devTools), "F12"));
-      case DEVICE_WIDTH -> throw new IllegalArgumentException("a group, see deviceWidthGroup");
+      case DEVICE_WIDTH, COLOR_SCHEME -> throw new IllegalArgumentException("a group, see deviceWidthGroup / colorSchemeGroup");
     };
   }
 

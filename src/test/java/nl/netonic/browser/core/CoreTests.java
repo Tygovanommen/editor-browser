@@ -24,6 +24,9 @@ public final class CoreTests {
     test("shorten", CoreTests::shorten);
     test("findDevServerUrl: picks the local URL out of console output", CoreTests::findDevServerUrl);
     test("hostPort: same host:port across equivalent URLs", CoreTests::hostPort);
+    test("origin: scheme, host and non-default port of http(s) pages", CoreTests::origin);
+    test("ColorScheme: saved keys and the emulation parameters", CoreTests::colorScheme);
+    test("HttpAuth: Basic challenge realm, Authorization header", CoreTests::httpAuth);
     test("DevPorts: listening ports from netstat / proc output", CoreTests::devPortsParse);
     test("DevPorts.Watch: reports watched ports that started since the last look", CoreTests::devPortsWatch);
     test("DeviceWidths: page area width per preset, zoom and tab width", CoreTests::deviceWidths);
@@ -145,6 +148,47 @@ public final class CoreTests {
     eq("localhost:5173", Urls.hostPort("http://LocalHost:5173"));
   }
 
+  static void origin() {
+    eq("http://localhost:8000", Urls.origin("http://localhost:8000/admin?x=1#top"));
+    eq("https://example.com", Urls.origin("https://Example.COM/a"));
+    eq("https://example.com", Urls.origin("https://example.com:443/"));
+    eq("http://example.com", Urls.origin("http://example.com:80"));
+    eq("https://example.com:8443", Urls.origin("https://example.com:8443/"));
+    eq("http://[::1]:5173", Urls.origin("http://[::1]:5173/"));
+    eq("http://backend.test", Urls.origin("view-source:http://backend.test/a"));
+    eq(null, Urls.origin("about:blank"));
+    eq(null, Urls.origin("file:///tmp/x.html"));
+    eq(null, Urls.origin("not a url"));
+    eq(null, Urls.origin(null));
+  }
+
+  static void httpAuth() {
+    eq("EB Staging", HttpAuth.basicRealm("Basic realm=\"EB Staging\""));
+    eq("EB Staging", HttpAuth.basicRealm("basic Realm = \"EB Staging\", charset=\"UTF-8\""));
+    eq("a \"q\" b", HttpAuth.basicRealm("Basic realm=\"a \\\"q\\\" b\""));
+    eq("plain", HttpAuth.basicRealm("Basic realm=plain"));
+    eq("", HttpAuth.basicRealm("Basic"));
+    eq("x", HttpAuth.basicRealm("Negotiate, Basic realm=\"x\""));
+    eq(null, HttpAuth.basicRealm("Digest realm=\"x\", nonce=\"Basic\""));
+    eq(null, HttpAuth.basicRealm("Bearer"));
+    eq(null, HttpAuth.basicRealm(null));
+    eq("Basic ZWI6c2VjcmV0", HttpAuth.basicHeader("eb", "secret"));
+    eq("Basic w6k6w6g=", HttpAuth.basicHeader("é", "è"));
+    yes(HttpAuth.isBasic("Basic ZWI6c2VjcmV0"));
+    no(HttpAuth.isBasic("Bearer x"));
+    no(HttpAuth.isBasic(null));
+  }
+
+  static void colorScheme() {
+    eq(ColorScheme.DARK, ColorScheme.parse("dark"));
+    eq(ColorScheme.LIGHT, ColorScheme.parse("light"));
+    eq(ColorScheme.SYSTEM, ColorScheme.parse(null));
+    eq(ColorScheme.SYSTEM, ColorScheme.parse(""));
+    eq(ColorScheme.SYSTEM, ColorScheme.parse("sepia"));
+    eq("{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":\"dark\"}]}", ColorScheme.DARK.emulatedMediaParams());
+    eq("{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":\"\"}]}", ColorScheme.SYSTEM.emulatedMediaParams());
+  }
+
   static void devPortsParse() {
     String mac = """
         Active Internet connections (including servers)
@@ -253,6 +297,10 @@ public final class CoreTests {
     eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.ZOOM));
     eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.DEVICE_WIDTH));
     eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.SHARE_PREVIEW));
+    eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.COLOR_SCHEME));
+    eq(ToolbarLayout.Place.MENU, d.place(ToolbarLayout.Item.CLEAR_SITE_DATA));
+    eq(java.util.Map.of("colorScheme", "toolbar", "clearSiteData", "hidden"), ToolbarLayout.parse(
+        java.util.Map.of("colorScheme", "toolbar", "clearSiteData", "hidden")).toStored());
     eq(java.util.Map.of("sharePreview", "toolbar"),
         d.with(ToolbarLayout.Item.SHARE_PREVIEW, ToolbarLayout.Place.TOOLBAR).toStored());
     yes(d.isDefault());
@@ -283,6 +331,18 @@ public final class CoreTests {
     String script = Js.countMatches("It's", 7);
     yes(script.contains("return '7:' + c;"));
     yes(script.endsWith("(\"It's\")"));
+    eq(0xffffff, Js.parseRgb("rgb(255, 255, 255)"));
+    eq(0x121212, Js.parseRgb("rgb(18, 18, 18)"));
+    eq(0x0a0b0c, Js.parseRgb(" rgba(10,11,12, 1) "));
+    eq(-1, Js.parseRgb("rgba(0, 0, 0, 0)"));
+    eq(-1, Js.parseRgb("rgb(300, 0, 0)"));
+    eq(-1, Js.parseRgb(""));
+    eq(-1, Js.parseRgb(null));
+    eq(-1, Js.parseRgb("color(srgb 1 1 1)"));
+    String cancelled = Js.signInCancelledPage("staging.test", "Team \"A\" </script>");
+    yes(cancelled.contains("document.title = 'Sign-in needed'"));
+    yes(cancelled.contains("if (location.protocol !== 'chrome-error:') return;"));
+    yes(cancelled.endsWith("(\"staging.test\", \"Team \\\"A\\\" \\u003c/script>\")"));
   }
 
   static void sharePreview() {

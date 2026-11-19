@@ -118,6 +118,11 @@ public final class Commands {
         out.append("zoomLabel ").append(zoom.isVisible() ? zoom.getText() : "(hidden)").append('\n');
         JBLabel width = field(ed, "widthLabel", JBLabel.class);
         out.append("widthLabel ").append(width.isVisible() ? width.getText() : "(hidden)").append('\n');
+        if (browser != null) {
+          out.append("canvas ").append(String.format("#%06x", browser.getComponent().getBackground().getRGB() & 0xffffff)).append('\n');
+        }
+        JBLabel scheme = field(ed, "schemeLabel", JBLabel.class);
+        out.append("schemeLabel ").append(scheme.isVisible() ? scheme.getText() : "(hidden)").append('\n');
         // the page's width in screen px out of the tab's (device width × zoom, centred)
         javax.swing.JPanel viewport = field(ed, "viewport", javax.swing.JPanel.class);
         if (browser != null) {
@@ -404,6 +409,66 @@ public final class Commands {
         JTextComponent t = field(selectedBrowser(), a[0], JTextComponent.class);
         t.setText(a.length > 1 ? a[1] : "");
         out.append("set ").append(a[0]);
+      }
+      // auth [<user> <password> | cancel]: the open Sign In dialog (HTTP basic auth) — its text, one label per line;
+      // or fills it in and signs in, or cancels it. No keyboard focus needed.
+      case "auth" -> {
+        com.intellij.openapi.ui.DialogWrapper dialog = null;
+        for (Window w : Window.getWindows()) {
+          if (!(w instanceof JDialog d) || !d.isShowing()) continue;
+          com.intellij.openapi.ui.DialogWrapper dw = com.intellij.openapi.ui.DialogWrapper.findInstance(d.getContentPane());
+          if (dw != null && dw.getClass().getName().equals("nl.netonic.browser.BasicAuth$Dialog")) dialog = dw;
+        }
+        if (dialog == null) {
+          out.append("no auth dialog");
+        } else if (arg.equals("cancel")) {
+          dialog.close(com.intellij.openapi.ui.DialogWrapper.CANCEL_EXIT_CODE);
+          out.append("cancelled");
+        } else if (!arg.isEmpty()) {
+          String[] a = arg.split(" ", 2);
+          field(dialog, "user", JTextComponent.class).setText(a[0]);
+          field(dialog, "password", JTextComponent.class).setText(a.length > 1 ? a[1] : "");
+          java.lang.reflect.Method ok = com.intellij.openapi.ui.DialogWrapper.class.getDeclaredMethod("doOKAction");
+          ok.setAccessible(true);
+          ok.invoke(dialog);
+          out.append("signed in as ").append(a[0]);
+        } else {
+          for (Component c : all(dialog.getContentPane())) {
+            if (c instanceof JBLabel l && l.isShowing()) {
+              out.append("label ").append(l.getText().replaceAll("<[^>]*>", " ").replace("&amp;", "&")
+                  .replaceAll(" +", " ").strip()).append('\n');
+            }
+          }
+        }
+      }
+      // cdp <method> [<params json>]: runs a DevTools protocol method on the selected browser tab, prints the reply
+      case "cdp" -> {
+        String[] a = arg.split(" ", 2);
+        JBCefBrowser browser = field(selectedBrowser(), "browser", JBCefBrowser.class);
+        org.cef.browser.CefDevToolsClient client = browser.getCefBrowser().getDevToolsClient();
+        if (client == null) throw new IllegalStateException("no DevTools client");
+        java.util.concurrent.CompletableFuture<String> f =
+            a.length > 1 ? client.executeDevToolsMethod(a[0], a[1]) : client.executeDevToolsMethod(a[0]);
+        try {
+          out.append("reply ").append(f.get(5, java.util.concurrent.TimeUnit.SECONDS));
+        } catch (Exception e) {
+          out.append("error ").append(e);
+        }
+      }
+      // loaderrors: from now on records the selected browser tab's load errors (Chromium's error code, URL); prints them
+      case "loaderrors" -> {
+        JBCefBrowser browser = field(selectedBrowser(), "browser", JBCefBrowser.class);
+        if (System.getProperty("ebdemo.loaderr.hooked." + browser.hashCode()) == null) {
+          System.setProperty("ebdemo.loaderr.hooked." + browser.hashCode(), "1");
+          browser.getJBCefClient().addLoadHandler(new org.cef.handler.CefLoadHandlerAdapter() {
+            @Override
+            public void onLoadError(org.cef.browser.CefBrowser b, org.cef.browser.CefFrame f,
+                org.cef.handler.CefLoadHandler.ErrorCode code, String text, String url) {
+              System.setProperty("ebdemo.loaderr", System.getProperty("ebdemo.loaderr", "") + code + " " + text + " " + url + "\n");
+            }
+          }, browser.getCefBrowser());
+        }
+        out.append(System.getProperty("ebdemo.loaderr", "none"));
       }
       // reloadinfo: what reload on save sees for the selected browser tab
       case "reloadinfo" -> {

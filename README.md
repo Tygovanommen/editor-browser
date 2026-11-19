@@ -22,13 +22,23 @@ still there after a restart.
 - **Browser basics in every tab:** back, forward, reload, an address bar, zoom (handy in a narrow split: 80% shows
   the desktop layout) and Chrome DevTools.
 - **A toolbar you arrange:** the toolbar keeps to back / forward / reload, the address bar, New Tab, DevTools and a
-  ⋮ menu with the rest (device width, zoom, find, share preview, open in default browser). Under
+  ⋮ menu with the rest (device width, color scheme, zoom, find, share preview, clear site data, open in default
+  browser). Under
   Settings › Tools › Editor Browser (or ⋮ › *Customize Toolbar…*) put each item on the toolbar, in ⋮ or hide it;
   shortcuts keep working for hidden items.
 - **Device widths:** ⋮ › *Device Width* lays the page out at 390 (phone), 768 (tablet) or 1280 px
   (laptop) wide, centred in the tab, so you see its responsive layout without resizing anything. The width is in
   CSS px, so it scales with the zoom; in a tab narrower than that, the page gets the tab's width. Click the
   "390 px" label (or pick *Full Width*) to go back.
+- **Light / dark mode:** ⋮ › *Color Scheme* › *Light* or *Dark* makes the page see that
+  `prefers-color-scheme`, to check a site's dark mode without switching your OS; per tab, kept after a restart.
+  Click the "Dark" label (or pick *System*) to go back.
+- **Clear site data:** ⋮ › *Clear Site Data* deletes the page's cookies and storage (local / session storage,
+  IndexedDB, service workers, Cache Storage), empties the browser cache and reloads: a fresh first visit, e.g. to
+  test a login or a cookie banner again.
+- **Password-protected sites:** a site that asks for a username and password (HTTP basic auth, e.g. a staging
+  server) gets a Sign In dialog; the login is used for that site until PhpStorm restarts, or ticked *Remember*, kept
+  in the IDE's password store. (Digest authentication isn't supported.)
 - **Reloads on save:** save a file in the project and the tabs on a local page (`localhost`, an IP, `*.test`,
   `*.local`) reload; a tab in the background reloads when you switch to it. Pages whose dev server already reloads
   them (Vite, webpack HMR, LiveReload, Browsersync) are left to it for front-end files (JS, CSS, Vue, …) and only
@@ -45,7 +55,8 @@ still there after a restart.
 - **New windows become tabs:** links with `target="_blank"` and `window.open()` open as a new editor tab.
 - **Page source:** right-click the page › *View Page Source* opens the HTML in a new tab (`view-source:` addresses
   work in the address bar too).
-- **Remembers:** tabs come back after a restart on the page you left them, with their zoom and device width.
+- **Remembers:** tabs come back after a restart on the page you left them, with their zoom, device width and color
+  scheme.
 - **From code:** select a URL › right-click › *Open in Editor Tab*.
 - **HTML files of the project:** right-click an `.html` file (in the project view, the editor or on its tab) ›
   *Open In › Browser Tab*, or click the globe in the HTML editor's floating browser bar. The file is shown from disk
