@@ -6,7 +6,8 @@
 #   tools/sandbox/demo.sh --probe [demo-root]     recompiles helper/Commands.java (loaded fresh for every command)
 #   tools/sandbox/demo.sh --stop [demo-root]
 # Starts PhpStorm with its own config / system / plugins under <root>/ide (your own PhpStorm and its settings are
-# not touched; only the license key is copied) and serves <root>/site on http://127.0.0.1:$EBDEMO_PORT.
+# not touched; only the license key is copied) and serves <root>/site on http://127.0.0.1:$EBDEMO_PORT
+# (server.py: also basic auth on /auth/ and slow / stalled / failing pages for the loading checks).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 MODE=new
@@ -51,7 +52,7 @@ stop_server() {
 
 start_server() {
   stop_server
-  # a plain file server, with HTTP basic auth on /auth/ (tools/sandbox/server.py)
+  # a file server, with HTTP basic auth on /auth/ and slow / failing test pages (tools/sandbox/server.py)
   nohup python3 -I "$PWD/tools/sandbox/server.py" "$PORT" "$ROOT/site" >"$ROOT/server.log" 2>&1 &
   echo $! > "$ROOT/server.pid"
 }

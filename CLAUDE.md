@@ -10,7 +10,7 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 
 ## Status (19 Nov 2026)
 
-- Version 0.5.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.6.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
   API use. `tools/sandbox/e2e.sh` passed 31/31 for 0.2.2. For 0.3.0 (19 Nov 2026) the last full run was 43/54:
@@ -26,6 +26,10 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   all 23 new checks passed (incl. Dark kept after a restart). The 12 failures: 10 keyboard checks + their
   follow-ons (`focus null`), "the source tab reopens as page source" (as above), and "⋮ › Zoom In: back to 100%"
   (timing: the same steps by hand work).
+- 0.6.0 loading / error feedback (25 Nov 2026: progress line, Stop button, tab spinner / error icon, notice
+  bar, wait for a local server, HTTP status badge): full `e2e.sh` 114/122; all 26 new checks (section 10f) passed.
+  The 8 failures: the keyboard checks + follow-ons (`focus null`, an Open URL dialog left open), incl. "a dev server
+  started in the Terminal (port 4321)", which passed when section 9 was rerun on its own.
 - `EditorEmptyTextProvider`/`EditorEmptyTextSink` (`impl` package) are `@ApiStatus.Internal` with no stable
   replacement; don't reintroduce an empty-editor-placeholder hint through them, `api-check.sh` will flag it.
 - Not verified yet: building against 2026.2.3 in the release workflow (the Linux tarball's JCEF folder is matched
@@ -59,6 +63,20 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   OS to open, which does nothing in the IDE). Chromium reports a `view-source:` page's address without the prefix:
   `sourceView` (set by the URL loaded) puts it back for the address bar and the store, so the tab reopens as source.
   Shortcuts are registered on the editor's root component (they win over the keymap inside the tab only).
+  Loading state (all UI-thread state, fed by the load handler): a progress line painted over the toolbar's bottom
+  border (`paintProgress`; Chromium reports no progress, so it creeps to 30% until the server answers, 90% after
+  `onLoadStart`, then finishes), the tab icon (`BrowserFavicons.Status`: spinner while loading, error icon for a
+  failed / crashed page or a 5xx; `MIN_SPIN_MS` keeps quick loads visible), and Reload → Stop (X) while loading
+  (a second click within `STOP_GUARD_MS` reloads again: a double click mustn't stop the load). The notice bar under
+  the toolbar (`showNotice`, kind = `notice.getName()`): "Waiting for host" after 3 s without an answer, a failed
+  load (`onLoadError`, words from `core/LoadErrors`, *Try Again*), a crash (`onRenderProcessTerminated`, *Reload*).
+  A local `ERR_CONNECTION_REFUSED` starts the wait for the server: `ServerProbe` (TCP connect, every address of the
+  host: Vite may listen on ::1 only) every second, reload when it accepts; at most `MAX_AUTO_RELOADS` reloads in a
+  row that fail again, 10 min. HTTP 4xx / 5xx → `statusLabel` badge. Callback order (measured): a failed load is
+  `onLoadError` → `onLoadEnd(status 0)` with **no** `onLoadStart`, then Chromium's error-page commit adds a second
+  loading cycle ending in `ERR_ABORTED` (not JCEF's `ErrorPage`: `setErrorPage(null)` doesn't remove it); Stop is
+  `ERR_ABORTED` + `onLoadEnd(-3)`. So `onLoadStart` of the main frame = the server answered (`pageLoaded` clears
+  the failure), and `ERR_ABORTED` / `ERR_INVALID_AUTH_CREDENTIALS` (BasicAuth's cancel) are never shown.
   Find in page (⌘F, ⌘G / ⇧⌘G, F3): a find bar under the toolbar; `CefBrowser.find` highlights and steps, but JCEF
   has no find-result handler, so the match count comes from `core/Js.countMatches` run in the page (body
   `innerText`, iframes not counted). Console errors: `onConsoleMessage` (ERROR / FATAL) → `core/ConsoleLog` → red
@@ -105,6 +123,8 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   Vite `/@vite/client`, webpack `webpackHotUpdate*`, LiveReload, Browsersync) skip front-end files
   (`core/LiveReload`). IDE saves only, deliberately not VFS changes: frameworks write caches / compiled templates
   on every request, which would loop.
+- `core/LoadErrors` — **pure JDK**: which load errors are shown, which wait for the server, a sentence per Chromium
+  error name (`CefLoadHandler.ErrorCode.name()`), HTTP status reasons, host / port of a URL.
 - `BrowserTabTitleProvider` — tab text = page title (40 chars) or host; tooltip = URL.
 - `BrowserTabs` — open a URL as a new tab (`OpenFileDescriptor.navigate`); `openOrReuse` / `openDevServerPort`
   for the automatic dev-server tabs (reuse the tab on the same host:port; loopback names count as `localhost`).
@@ -147,11 +167,13 @@ tools/sandbox/e2e.sh     # macOS: sandboxed PhpStorm (own config under /tmp/ebde
   PhpStorm's bundled JBR (no `jar` tool: `build.sh` falls back to `zip`).
 - Classpath = `lib/` + the JCEF plugin's `lib/` (`plugins/*jcef*/lib`, `jcef-plugin` on macOS 2026.3).
 - Sandbox (`tools/sandbox/`): `demo.sh` starts PhpStorm with its own config/system/plugins and serves
-  `/tmp/ebdemo/site` on `127.0.0.1:8765` (`EBDEMO_PORT`; `server.py`, basic auth `eb` / `secret` on `/auth/`); `cmd.sh <command>` talks to the helper plugin
+  `/tmp/ebdemo/site` on `127.0.0.1:8765` (`EBDEMO_PORT`; `server.py`, basic auth `eb` / `secret` on `/auth/`, and
+  `/slow/<ms>`, `/stall/<ms>` (an image that takes that long), `/status/<code>`, `/drop` (no answer)); `cmd.sh <command>` talks to the helper plugin
   (`helper/Commands.java`: `open`, `tabs`, `state`, `js`, `click x y`, `rclick x y` (Chromium's context menu),
   `buttons` (the tab's visible toolbar buttons), `layout default | item=place …` (set the toolbar layout),
   `auth [user password | cancel]` (the Sign In dialog's text, or fill in / cancel it), `cdp <method> [json]` (a
-  DevTools protocol call), `loaderrors` (record / print Chromium load errors),
+  DevTools protocol call), `loaderrors` (record / print Chromium load errors), `loadevents [clear]` (record / print every load callback, in
+  order), `notice <link>` (click a link of the notice bar; `state` prints `progress`, `tabicon`, `http`, `notice`),
   `menu [label]` (list / pick an item of the open list popup), `dump`, `stroke "meta L"`, `action <id>`, `type`,
   `key`, `file`, `select`, `shot`, `quit`; `demo.sh --probe` reloads it without a restart). JCEF runs off-screen
   (OSR) there, so `shot` (Swing paint) includes the page. A script `click()` on a `target=_blank` link is blocked

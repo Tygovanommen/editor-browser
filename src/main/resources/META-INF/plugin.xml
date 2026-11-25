@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.5.0</version>
+  <version>0.6.0</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -23,6 +23,9 @@
       <li>Saving a project file reloads the tabs on a local page (<code>localhost</code>, <code>*.test</code>, …);
           pages with their own hot reload (Vite, webpack) are left to it for front-end files.</li>
       <li>Find in page (⌘F), and a toolbar badge counting the page's console errors.</li>
+      <li>You see what a page is doing: a progress line and a spinning tab icon while it loads, a bar saying why a
+          page didn't load (with <i>Try Again</i>), a 404 / 500 badge, and a tab that reloads by itself once its
+          local dev server is up.</li>
       <li>A toolbar you arrange: put each optional button on the toolbar, in its ⋮ menu or hide it.</li>
       <li>Share preview: the link card a page gets in Slack, X, LinkedIn or WhatsApp (its <code>og:</code> /
           <code>twitter:</code> meta tags), in a popover, with what is missing.</li>
@@ -40,6 +43,20 @@
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.6.0</p>
+    <ul>
+      <li>Loading is visible: a progress line under the toolbar and a spinning tab icon while a page loads, and
+          Reload turns into Stop (✕) only then (before, the spinning reload icon was a Stop button, so clicking
+          "refresh" on a slow page cancelled it). A double click on Reload no longer stops the load it started.</li>
+      <li>A server that hasn't answered after 3 s gets a "Waiting for localhost:8000" bar (paused at a
+          breakpoint?), with Stop.</li>
+      <li>A page that can't load gets a red bar saying why, in words (nothing running on that port, unknown host,
+          connection closed, certificate, redirect loop, …), with <i>Try Again</i>, and a red tab icon.</li>
+      <li>A local server that refused the connection (a dev server still starting): the tab waits for it and
+          reloads by itself once it accepts connections; <i>Stop Waiting</i> turns that off.</li>
+      <li>An HTTP error answer shows as a 404 / 500 badge in the toolbar (a 5xx also turns the tab icon red); a
+          crashed page gets a bar with <i>Reload</i>.</li>
+    </ul>
     <p>0.5.0</p>
     <ul>
       <li>Light / dark mode: ⋮ › <i>Color Scheme</i> › <i>Light</i> or <i>Dark</i> makes the page see that

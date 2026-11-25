@@ -348,6 +348,75 @@ until_has 15 "* browser 'EB Signed In'" c tabs
 [[ "$(c auth)" == "no auth dialog" ]] && pass "another tab on the site doesn't ask again (same session)" \
   || fail "another tab on the site doesn't ask again" "$(c auth | tr '\n' ' ')"
 
+section "10f Loading, failed pages, server errors"
+# server.py: /slow/<ms> answers late, /stall/<ms> has an image that takes that long, /status/<code>, /drop
+ld() { c state | grep -E "^(loading|progress|tabicon|http|notice) "; c buttons | grep -E "'(Stop|Reload)'"; }
+c closedialogs >/dev/null
+c open "$SITE/slow/6000" >/dev/null
+contains "while a page loads: a Stop (X) button instead of Reload" "button 'Stop'" ld
+contains "… the progress line" "progress shown" ld
+contains "… and a spinner as the tab icon" "tabicon LOADING" ld
+contains "no answer after 3 s: the notice bar says the tab is waiting for the server" \
+  "notice waiting: Waiting for 127.0.0.1:$PORT" ld
+contains "once loaded: Reload again, the notice gone" "button 'Reload'" ld
+sleep 1 # the progress line runs to the end and fades out first
+out=$(ld)
+[[ "$out" == *"notice (hidden)"* && "$out" == *"tabicon NORMAL"* && "$out" == *"progress hidden"* ]] \
+  && pass "… no progress line, the normal tab icon" || fail "… no progress line, the normal tab icon" "$(echo "$out" | tr '\n' ' ')"
+c open "$SITE/stall/30000" >/dev/null
+until_has 10 "* browser 'EB Stall'" c tabs
+contains "a page still loading an image: Stop is shown" "button 'Stop'" ld
+c button Stop >/dev/null
+contains "… and clicking it stops the load" "loading false" ld
+c button Reload >/dev/null
+out=$(c button Stop)
+sleep 1
+[[ "$out" == *clicked* && "$(ld)" == *"loading true"* ]] \
+  && pass "a second click right after Reload (a double click) doesn't stop the load" \
+  || fail "a double click on Reload doesn't stop the load" "$out / $(ld | tr '\n' ' ')"
+c button Stop >/dev/null
+# a local server that isn't running yet: the tab waits for it and reloads when it is up
+RPORT=59996
+c open "http://localhost:$RPORT/" >/dev/null
+contains "a refused connection: the notice bar says so, in words" \
+  "notice failed: Can't open localhost:$RPORT  Nothing is answering on localhost:$RPORT. Is the server running?" ld
+contains "… the tab icon turns into an error icon" "tabicon FAILED" ld
+contains "… a local server: it waits for it (Stop Waiting)" "[Try Again] [Stop Waiting]" ld
+c call userReload >/dev/null
+contains "Reload while it is still down: \"Still can't open\"" "Still can't open localhost:$RPORT" ld
+python3 -m http.server $RPORT --bind 127.0.0.1 --directory "$ROOT/site" >/dev/null 2>&1 & RPID=$!
+contains "the server starts: the tab reloads by itself" "* browser 'EB Home'" c tabs
+out=$(ld)
+[[ "$out" == *"notice (hidden)"* && "$out" == *"tabicon NORMAL"* ]] && pass "… the notice and the error icon are gone" \
+  || fail "… the notice and the error icon are gone" "$(echo "$out" | tr '\n' ' ')"
+kill $RPID; wait $RPID 2>/dev/null
+c call userReload >/dev/null
+until_has 15 "Stop Waiting" ld
+c notice "Stop Waiting" >/dev/null
+out=$(ld)
+[[ "$out" == *"notice failed: "* && "$out" != *"Stop Waiting"* && "$out" != *"reloads when"* ]] \
+  && pass "Stop Waiting: the notice stays, without the wait" || fail "Stop Waiting" "$(echo "$out" | tr '\n' ' ')"
+c open "$SITE/drop" >/dev/null
+contains "a connection closed without an answer: says so (ERR_EMPTY_RESPONSE)" "closed the connection without an answer" ld
+c open "http://no-such-host.invalid/" >/dev/null
+contains "an unknown host: says so" "Can't find no-such-host.invalid" ld
+c open "$SITE/status/500" >/dev/null
+until_has 15 "* browser 'EB Status 500'" c tabs
+contains "an HTTP 500 answer: a 500 badge" "http 500" ld
+contains "… and the error tab icon" "tabicon FAILED" ld
+c js "location.href='/status/404'" >/dev/null
+until_has 15 "* browser 'EB Status 404'" c tabs
+contains "a 404: a 404 badge, the normal tab icon" "tabicon NORMAL" ld
+contains "… badge 404" "http 404" ld
+c js "location.href='/second.html'" >/dev/null
+until_has 15 "* browser 'EB Second'" c tabs
+contains "a 200 page: no badge" "http -" ld
+c cdp Page.crash >/dev/null
+contains "the page's process crashes: the notice bar says so" "notice crashed: The page crashed" ld
+c notice Reload >/dev/null
+contains "… its Reload brings the page back" "notice (hidden)" ld
+contains "… the page shows again" "* browser 'EB Second'" c tabs
+
 section "11 Restart"
 before=$(c tabs | grep -c "browser '")
 c layout find=toolbar >/dev/null

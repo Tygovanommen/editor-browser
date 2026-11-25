@@ -30,6 +30,7 @@ import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.ui.components.ActionLink;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.jcef.JBCefApp;
@@ -68,6 +69,7 @@ import nl.netonic.browser.core.ConsoleLog;
 import nl.netonic.browser.core.DeviceWidths;
 import nl.netonic.browser.core.Js;
 import nl.netonic.browser.core.LiveReload;
+import nl.netonic.browser.core.LoadErrors;
 import nl.netonic.browser.core.SharePreview;
 import nl.netonic.browser.core.ToolbarLayout;
 import nl.netonic.browser.core.ToolbarLayout.Item;
@@ -83,6 +85,7 @@ import org.cef.handler.CefContextMenuHandlerAdapter;
 import org.cef.handler.CefDisplayHandlerAdapter;
 import org.cef.handler.CefLifeSpanHandlerAdapter;
 import org.cef.handler.CefLoadHandlerAdapter;
+import org.cef.handler.CefRequestHandler.TerminationStatus;
 import org.cef.handler.CefRequestHandlerAdapter;
 import org.cef.handler.CefResourceRequestHandler;
 import org.cef.misc.BoolRef;
@@ -94,10 +97,16 @@ import org.jetbrains.annotations.Nullable;
 public final class BrowserEditor extends UserDataHolderBase implements FileEditor {
   public static final String TOOLBAR_PLACE = "EditorBrowser";
   private static final int[] ZOOM_STEPS = {25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300};
-  /** The reload icon, spinning in place, shown instead of a static icon while the page loads. */
-  private static final Icon RELOAD_SPINNER = reloadSpinner();
-  /** Minimum time the reload button spins after a load starts, see {@link #spinUntil}. */
+  /** Minimum time the progress line and the tab's spinner show after a load starts, see {@link #spinUntil}. */
   private static final int MIN_SPIN_MS = 500;
+  /** A second click on Reload within this time reloads again instead of stopping the load it just started. */
+  private static final int STOP_GUARD_MS = 700;
+  /** No answer from the server after this long: the notice bar says the tab is waiting for it. */
+  private static final int WAITING_NOTICE_MS = 3000;
+  /** How long a tab waits for its local server to come up (see {@link #startWaitingForServer}). */
+  private static final long WAIT_FOR_SERVER_MS = 10 * 60 * 1000;
+  /** Reloads by the wait for the server that failed again in a row before the tab stops waiting. */
+  private static final int MAX_AUTO_RELOADS = 3;
   private static final Icon DEVICE_WIDTH_ICON = IconLoader.getIcon("/icons/deviceWidth.svg", BrowserEditor.class);
   private static final Icon COLOR_SCHEME_ICON = IconLoader.getIcon("/icons/colorScheme.svg", BrowserEditor.class);
   /** Evaluates to the page's best favicon URL, or {@code ""} for a page with no real origin (e.g. about:blank). */
@@ -140,6 +149,17 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private final JPanel viewport = new Viewport();
   /** Red error icon + count when the page logged console errors; click for DevTools. */
   private final JBLabel errorLabel = new JBLabel();
+  /** "500" / "404" when the server answered the page with an HTTP error status. */
+  private final JBLabel statusLabel = new JBLabel();
+  /**
+   * The notice bar under the toolbar: the page failed to load / crashed (with Try Again), or the server hasn't
+   * answered yet; hidden when there is nothing to say. UI thread only, like the state behind it.
+   */
+  private final JPanel notice = new JPanel(new BorderLayout(JBUI.scale(8), 0));
+  private final JBLabel noticeText = new JBLabel();
+  private final JPanel noticeLinks = new JPanel(new FlowLayout(FlowLayout.RIGHT, JBUI.scale(12), 0));
+  /** The toolbar, whose bottom edge shows the progress line ({@link #paintProgress}). */
+  private @Nullable JComponent toolbarBar;
   private final ConsoleLog console = new ConsoleLog();
   /** Find in page (⌘F), between the toolbar and the page; hidden until opened. */
   private final JPanel findBar = new JPanel(new BorderLayout());
@@ -162,10 +182,36 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private volatile boolean sourceView;
   private volatile boolean loading;
   /**
-   * The reload button spins at least until this time ({@link System#currentTimeMillis()}), so a page that loads in
-   * a few milliseconds (a local dev server) still shows that it reloaded.
+   * The progress line and the tab's spinner show at least until this time ({@link System#currentTimeMillis()}), so
+   * a page that loads in a few milliseconds (a local dev server) still shows that it reloaded.
    */
   private volatile long spinUntil;
+  /** When the current load started (Chromium's loading state went on). */
+  private volatile long loadStartedAt;
+  /** The server answered the current load: the main frame started loading the new page ({@code onLoadStart}). */
+  private volatile boolean committed;
+  /** The HTTP status of the page shown (0: none / not http, or the load failed). */
+  private volatile int httpStatus;
+  /** When Reload was clicked (see {@link #STOP_GUARD_MS}). UI thread only. */
+  private long reloadClickedAt;
+  /** The progress line: 0..1, or -1 when hidden; animated by {@link #progressTimer}. UI thread only. */
+  private double progress = -1;
+  private @Nullable Timer progressTimer;
+  /** The last failed load (Chromium's error name and the URL), until a page loads again. UI thread only. */
+  private @Nullable String failedError;
+  private @Nullable String failedUrl;
+  /** How many times in a row that same load failed: "Still can't open …" from the second time. */
+  private int failedTimes;
+  /** Chromium's page process ended: how ("crashed", "was stopped", "ran out of memory"), else null. UI thread only. */
+  private @Nullable String crashed;
+  /** Waiting for the failed page's local server to accept connections, to reload then. UI thread only. */
+  private @Nullable Timer serverWait;
+  private long serverWaitSince;
+  private boolean probing;
+  /** The user clicked Stop Waiting for this failure. */
+  private boolean waitDeclined;
+  /** Reloads by the server wait in a row that failed again (see {@link #MAX_AUTO_RELOADS}). */
+  private int autoReloads;
   /** The toolbar with the reload button: refreshed when the loading state changes; set once in the constructor. */
   private @Nullable ActionToolbar navToolbar;
   /** The toolbar right of the address bar (optional items + ⋮); set once in the constructor. */
@@ -260,21 +306,32 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     browser.getJBCefClient().addLoadHandler(new CefLoadHandlerAdapter() {
       @Override
       public void onLoadingStateChange(CefBrowser b, boolean isLoading, boolean back, boolean forward) {
-        if (isLoading && !loading) spinUntil = System.currentTimeMillis() + MIN_SPIN_MS;
+        if (isLoading && !loading) {
+          long now = System.currentTimeMillis();
+          spinUntil = Math.max(spinUntil, now + MIN_SPIN_MS);
+          loadStartedAt = now;
+          committed = false;
+        }
         loading = isLoading;
         canGoBack = back;
         canGoForward = forward;
         if (!isLoading) applyZoom();
-        onEdt(BrowserEditor.this::refreshReloadButton);
+        onEdt(BrowserEditor.this::refreshLoading);
       }
 
       @Override
       public void onLoadStart(CefBrowser b, CefFrame frame, CefRequest.TransitionType transitionType) {
         if (frame == null || !frame.isMain()) return;
+        // the server answered: a new page (Chromium's error page for a failed load doesn't get here)
+        committed = true;
+        httpStatus = 0;
         // a new page: its own console errors and dev-server client
         console.clear();
         pageReloadsItself = false;
-        onEdt(BrowserEditor.this::updateErrorLabel);
+        onEdt(() -> {
+          updateErrorLabel();
+          pageLoaded();
+        });
         // the emulation outlives navigations; set again in case Chromium started a new renderer for this page
         if (colorScheme() != ColorScheme.SYSTEM) applyColorScheme();
       }
@@ -282,10 +339,20 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       @Override
       public void onLoadEnd(CefBrowser b, CefFrame frame, int httpStatusCode) {
         if (frame == null || !frame.isMain()) return;
+        // 0 for a failed load (onLoadError), negative (an error code) for a stopped one
+        httpStatus = Math.max(0, httpStatusCode);
+        onEdt(BrowserEditor.this::updateStatusLabel);
         b.executeJavaScript(faviconQuery.inject(FAVICON_JS), b.getURL(), 0);
         b.executeJavaScript(liveReloadQuery.inject(LIVE_RELOAD_JS), b.getURL(), 0);
         readCanvas();
         onEdt(() -> { if (findBar.isVisible()) runFind(true, false); });
+      }
+
+      @Override
+      public void onLoadError(CefBrowser b, CefFrame frame, ErrorCode errorCode, String errorText, String failedUrl) {
+        if (frame == null || !frame.isMain() || errorCode == null || !LoadErrors.shown(errorCode.name())) return;
+        String error = errorCode.name();
+        onEdt(() -> loadFailed(error, failedUrl));
       }
     }, cef);
     browser.getJBCefClient().addLifeSpanHandler(new CefLifeSpanHandlerAdapter() {
@@ -303,6 +370,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       }
     }, cef);
     browser.getJBCefClient().addRequestHandler(new CefRequestHandlerAdapter() {
+      @Override
+      public void onRenderProcessTerminated(CefBrowser b, TerminationStatus status, int errorCode, String errorString) {
+        onEdt(() -> pageCrashed(status));
+      }
+
       @Override
       public CefResourceRequestHandler getResourceRequestHandler(CefBrowser b, CefFrame frame, CefRequest request,
           boolean isNavigation, boolean isDownload, String requestInitiator, BoolRef disableDefaultHandling) {
@@ -345,6 +417,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
     JPanel north = new JPanel(new BorderLayout());
     north.add(createToolbar(), BorderLayout.NORTH);
+    north.add(createNotice(), BorderLayout.CENTER);
     north.add(createFindBar(), BorderLayout.SOUTH);
     root.add(north, BorderLayout.NORTH);
     viewport.add(browser.getComponent());
@@ -617,7 +690,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
           }
           spinUntil = System.currentTimeMillis() + MIN_SPIN_MS;
           withCef(CefBrowser::reloadIgnoreCache);
-          refreshReloadButton();
+          refreshLoading();
           status("Cleared the cookies, storage and cache of " + origin);
         }));
   }
@@ -856,8 +929,17 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       }
     });
     updateErrorLabel();
+    statusLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+    statusLabel.addMouseListener(new MouseAdapter() {
+      @Override
+      public void mouseClicked(MouseEvent e) {
+        if (browser != null) browser.openDevtools();
+      }
+    });
+    statusLabel.setVisible(false);
     JPanel labels = new JPanel(new FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0));
     labels.setOpaque(false);
+    labels.add(statusLabel);
     labels.add(errorLabel);
     labels.add(schemeLabel);
     labels.add(widthLabel);
@@ -867,7 +949,14 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     east.add(labels, BorderLayout.WEST);
     east.add(sideToolbar.getComponent(), BorderLayout.CENTER);
 
-    JPanel bar = new JPanel(new BorderLayout(JBUI.scale(4), 0));
+    JPanel bar = new JPanel(new BorderLayout(JBUI.scale(4), 0)) {
+      @Override
+      protected void paintChildren(Graphics g) {
+        super.paintChildren(g);
+        paintProgress(g, this);
+      }
+    };
+    toolbarBar = bar;
     bar.setBorder(JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(2, 4)));
     bar.add(navToolbar.getComponent(), BorderLayout.WEST);
     bar.add(address, BorderLayout.CENTER);
@@ -1005,8 +1094,8 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private void registerShortcuts() {
     String mod = SystemInfo.isMac ? "meta" : "control";
     shortcut(mod + " L", () -> address.requestFocusInWindow());
-    shortcut(mod + " R", () -> withCef(CefBrowser::reload));
-    shortcut("F5", () -> withCef(CefBrowser::reload));
+    shortcut(mod + " R", this::userReload);
+    shortcut("F5", this::userReload);
     shortcut(mod + " shift R", () -> withCef(CefBrowser::reloadIgnoreCache));
     shortcut(mod + " OPEN_BRACKET", () -> withCef(CefBrowser::goBack));
     shortcut(mod + " CLOSE_BRACKET", () -> withCef(CefBrowser::goForward));
@@ -1052,78 +1141,319 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     };
   }
 
-  private static Icon reloadSpinner() {
-    Icon base = AllIcons.Actions.Refresh;
-    int frameCount = 8;
-    Icon[] frames = new Icon[frameCount];
-    // Negative: Java2D rotates clockwise for positive angles (y points down), and the Refresh icon's arrows point
-    // counter-clockwise, so the spin follows the arrows.
-    for (int i = 0; i < frameCount; i++) frames[i] = rotated(base, -2 * Math.PI * i / frameCount);
-    return new AnimatedIcon(100, frames);
-  }
+  // --- loading state: progress line, tab icon, notice bar
 
-  private static Icon rotated(Icon base, double radians) {
-    return new Icon() {
-      @Override
-      public void paintIcon(java.awt.Component c, java.awt.Graphics g, int x, int y) {
-        java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
-        g2.rotate(radians, x + base.getIconWidth() / 2.0, y + base.getIconHeight() / 2.0);
-        base.paintIcon(c, g2, x, y);
-        g2.dispose();
-      }
-
-      @Override
-      public int getIconWidth() {
-        return base.getIconWidth();
-      }
-
-      @Override
-      public int getIconHeight() {
-        return base.getIconHeight();
-      }
-    };
-  }
-
-  /** True while the reload button shows the spinner: loading, or within {@link #MIN_SPIN_MS} of a load start. */
+  /** True while the progress line and the tab's spinner show: loading, or within {@link #MIN_SPIN_MS} of a load start. */
   private boolean spinning() {
     return loading || System.currentTimeMillis() < spinUntil;
   }
 
   /**
-   * Updates the reload button now (the toolbar's own refresh is periodic and would miss a quick load), and once
-   * more when the minimum spin time is over. UI thread only.
+   * The loading state changed: updates the Reload / Stop button now (the toolbar's own refresh is periodic and would
+   * miss a quick load), the tab icon, and runs the progress line while loading. UI thread only.
    */
-  private void refreshReloadButton() {
-    if (navToolbar == null || (browser != null && browser.isDisposed())) return;
+  private void refreshLoading() {
+    if (navToolbar == null || browser == null || browser.isDisposed()) return;
     navToolbar.updateActionsAsync();
-    long left = spinUntil - System.currentTimeMillis();
-    if (!loading && left > 0) {
-      Timer timer = new Timer((int) left + 20, e -> refreshReloadButton());
-      timer.setRepeats(false);
-      timer.start();
+    updateTabStatus();
+    if (spinning() || progress >= 0) startProgress();
+  }
+
+  private void startProgress() {
+    if (progressTimer != null) return;
+    progressTimer = new Timer(30, e -> tickProgress());
+    progressTimer.start();
+  }
+
+  /**
+   * One frame of the progress line. Chromium doesn't report how far a load is, so it creeps up like a browser's:
+   * towards 30% while waiting for the server, 90% once the page is coming in, then runs to the end and fades out.
+   */
+  private void tickProgress() {
+    long now = System.currentTimeMillis();
+    if (spinning()) {
+      if (progress < 0) progress = 0.02;
+      double target = committed ? 0.9 : 0.3;
+      if (progress < target) progress += Math.max(0.0015, (target - progress) * 0.04);
+      if (loading && !committed && now - loadStartedAt > WAITING_NOTICE_MS && failedError == null && crashed == null) {
+        showWaitingNotice((now - loadStartedAt) / 1000);
+      }
+    } else if (progress >= 0) {
+      progress = progress >= 1 ? -1 : Math.min(1, progress + 0.2);
+    }
+    if (!loading && "waiting".equals(notice.getName())) hideNotice();
+    if (toolbarBar != null) {
+      int h = JBUI.scale(2);
+      toolbarBar.repaint(0, toolbarBar.getHeight() - h, toolbarBar.getWidth(), h);
+    }
+    if (progress < 0 && !spinning()) {
+      if (progressTimer != null) progressTimer.stop();
+      progressTimer = null;
+      // the minimum spin time is over: the tab icon and the button follow
+      updateTabStatus();
+      if (navToolbar != null) navToolbar.updateActionsAsync();
     }
   }
 
+  /** The progress line, over the toolbar's bottom border. */
+  private void paintProgress(Graphics g, JComponent bar) {
+    if (progress < 0) return;
+    int h = JBUI.scale(2);
+    g.setColor(JBColor.namedColor("ProgressBar.progressColor", new JBColor(0x3574F0, 0x548AF7)));
+    g.fillRect(0, bar.getHeight() - h, (int) Math.round(bar.getWidth() * Math.min(1, progress)), h);
+  }
+
+  /** The tab icon: a spinner while loading, an error icon for a failed / crashed page or a server error. */
+  private void updateTabStatus() {
+    BrowserFavicons.Status status = spinning() ? BrowserFavicons.Status.LOADING
+        : failedError != null || crashed != null || httpStatus >= 500 ? BrowserFavicons.Status.FAILED
+        : BrowserFavicons.Status.NORMAL;
+    if (BrowserFavicons.setStatus(file.id(), status)) refreshTab();
+  }
+
+  private void updateStatusLabel() {
+    int code = httpStatus;
+    boolean shown = LoadErrors.isHttpError(code);
+    statusLabel.setVisible(shown);
+    if (shown) {
+      statusLabel.setText(Integer.toString(code));
+      statusLabel.setIcon(code >= 500 ? AllIcons.General.Error : AllIcons.General.Warning);
+      statusLabel.setToolTipText("<html>The server answered <b>" + StringUtil.escapeXmlEntities(LoadErrors.httpStatus(code))
+          + "</b>; click to open DevTools</html>");
+    }
+    updateTabStatus();
+  }
+
+  /** A page loaded (the main frame got an answer): whatever failed before is over. UI thread only. */
+  private void pageLoaded() {
+    failedError = null;
+    failedUrl = null;
+    failedTimes = 0;
+    crashed = null;
+    autoReloads = 0;
+    waitDeclined = false;
+    stopWaitingForServer();
+    hideNotice();
+    updateStatusLabel();
+  }
+
+  /** The main frame failed to load {@code url} (Chromium shows its error page). UI thread only. */
+  private void loadFailed(String error, String url) {
+    if (browser == null || browser.isDisposed()) return;
+    boolean again = error.equals(failedError) && url.equals(failedUrl);
+    failedTimes = again ? failedTimes + 1 : 1;
+    if (!again) {
+      autoReloads = 0;
+      waitDeclined = false;
+    }
+    failedError = error;
+    failedUrl = url;
+    httpStatus = 0;
+    stopWaitingForServer();
+    if (LoadErrors.waitsForServer(error, url) && !waitDeclined && autoReloads < MAX_AUTO_RELOADS) {
+      startWaitingForServer();
+    }
+    showFailureNotice();
+    updateStatusLabel();
+  }
+
+  private void showFailureNotice() {
+    String url = failedUrl;
+    String error = failedError;
+    if (url == null || error == null) return;
+    String title = (failedTimes > 1 ? "Still can't open " + LoadErrors.site(url) : LoadErrors.title(url));
+    String text = LoadErrors.describe(error, url);
+    if (serverWait != null) text += " The page reloads when it is up.";
+    else if (LoadErrors.waitsForServer(error, url) && autoReloads >= MAX_AUTO_RELOADS) {
+      text += " It accepts connections but the page still doesn't load.";
+    }
+    List<Runnable> actions = new java.util.ArrayList<>();
+    List<String> labels = new java.util.ArrayList<>();
+    labels.add("Try Again");
+    actions.add(this::retry);
+    if (serverWait != null) {
+      labels.add("Stop Waiting");
+      actions.add(() -> {
+        waitDeclined = true;
+        stopWaitingForServer();
+        showFailureNotice();
+      });
+    }
+    showNotice("failed", JBUI.CurrentTheme.Banner.ERROR_BACKGROUND, JBUI.CurrentTheme.Banner.ERROR_BORDER_COLOR,
+        serverWait != null ? AnimatedIcon.Default.INSTANCE : AllIcons.General.Error,
+        title, text + " (" + error + ")", labels, actions);
+  }
+
+  private void showWaitingNotice(long seconds) {
+    String text = "No answer yet" + (seconds >= 5 ? " after " + seconds + " s" : "") + "."
+        + (Urls.isLocal(file.url()) ? " Paused at a breakpoint, or a slow request?" : "");
+    showNotice("waiting", JBUI.CurrentTheme.Banner.INFO_BACKGROUND, JBUI.CurrentTheme.Banner.INFO_BORDER_COLOR,
+        AnimatedIcon.Default.INSTANCE, "Waiting for " + LoadErrors.site(currentLoadUrl()), text,
+        List.of("Stop"), List.of(this::stopLoading));
+  }
+
+  /** The URL being loaded: what the address bar shows unless the user is typing there, else the tab's URL. */
+  private String currentLoadUrl() {
+    String cef = browser == null ? null : browser.getCefBrowser().getURL();
+    return cef != null && !cef.isBlank() ? cef : file.url();
+  }
+
+  /** Chromium's page process ended: the page is gone (blank or a sad face) until it is reloaded. UI thread only. */
+  private void pageCrashed(TerminationStatus status) {
+    if (browser == null || browser.isDisposed()) return;
+    String why = switch (status) {
+      case TS_PROCESS_OOM -> "ran out of memory";
+      case TS_PROCESS_WAS_KILLED -> "was stopped";
+      default -> "crashed";
+    };
+    crashed = why;
+    stopWaitingForServer();
+    showNotice("crashed", JBUI.CurrentTheme.Banner.ERROR_BACKGROUND, JBUI.CurrentTheme.Banner.ERROR_BORDER_COLOR,
+        AllIcons.General.Error, "The page " + why, "Chromium's process for this page ended: reload to show it again.",
+        List.of("Reload"), List.of(this::retry));
+    updateTabStatus();
+  }
+
+  /** Try Again in the notice bar: loads the page again, and lets the wait for its server start over. */
+  private void retry() {
+    autoReloads = 0;
+    waitDeclined = false;
+    stopWaitingForServer();
+    reloadNow();
+  }
+
+  /** Reloads with immediate feedback (Chromium reports the load start a moment later). */
+  private void reloadNow() {
+    spinUntil = System.currentTimeMillis() + MIN_SPIN_MS;
+    String url = crashed != null ? currentLoadUrl() : null;
+    // after a crash a plain reload may find no page to reload: load the URL again
+    if (url != null && browser != null) browser.getCefBrowser().loadURL(url);
+    else withCef(CefBrowser::reload);
+    refreshLoading();
+  }
+
+  /** Reload by the user (button, ⌘R / F5): after a failure also a fresh start for the wait for the server. */
+  private void userReload() {
+    if (failedError != null || crashed != null) retry();
+    else reloadNow();
+  }
+
+  private void stopLoading() {
+    withCef(CefBrowser::stopLoad);
+    spinUntil = 0;
+    refreshLoading();
+  }
+
+  /**
+   * The local server refused the connection: checks every second whether it accepts connections now (a dev server
+   * starting or restarting), and reloads the page when it does. Gives up after {@link #WAIT_FOR_SERVER_MS}.
+   */
+  private void startWaitingForServer() {
+    if (serverWait != null) return;
+    serverWaitSince = System.currentTimeMillis();
+    serverWait = new Timer(1000, e -> probeServer());
+    serverWait.start();
+  }
+
+  private void stopWaitingForServer() {
+    if (serverWait != null) serverWait.stop();
+    serverWait = null;
+  }
+
+  private void probeServer() {
+    String url = failedUrl;
+    String host = url == null ? null : LoadErrors.hostOf(url);
+    int port = url == null ? -1 : LoadErrors.portOf(url);
+    if (host == null || port < 0 || browser == null || browser.isDisposed()) {
+      stopWaitingForServer();
+      return;
+    }
+    if (System.currentTimeMillis() - serverWaitSince > WAIT_FOR_SERVER_MS) {
+      stopWaitingForServer();
+      showFailureNotice();
+      return;
+    }
+    if (probing) return;
+    probing = true;
+    ApplicationManager.getApplication().executeOnPooledThread(() -> {
+      boolean up = ServerProbe.accepts(host, port);
+      onEdt(() -> {
+        probing = false;
+        if (!up || serverWait == null || !url.equals(failedUrl)) return;
+        stopWaitingForServer();
+        autoReloads++;
+        reloadNow();
+      });
+    });
+  }
+
+  private JComponent createNotice() {
+    notice.setBorder(JBUI.Borders.empty(5, 10));
+    noticeText.setIconTextGap(JBUI.scale(8));
+    noticeLinks.setOpaque(false);
+    notice.add(noticeText, BorderLayout.CENTER);
+    notice.add(noticeLinks, BorderLayout.EAST);
+    notice.setVisible(false);
+    return notice;
+  }
+
+  /**
+   * Shows the notice bar: {@code kind} names what it says (for {@link #hideNotice} by kind and the sandbox's
+   * checks), a bold title, a sentence, and links. UI thread only.
+   */
+  private void showNotice(String kind, Color background, Color border, Icon icon, String title, String text,
+      List<String> labels, List<Runnable> actions) {
+    String html = "<html><b>" + StringUtil.escapeXmlEntities(title) + "</b>&nbsp;&nbsp;"
+        + StringUtil.escapeXmlEntities(text) + "</html>";
+    boolean same = kind.equals(notice.getName()) && html.equals(noticeText.getText()) && notice.isVisible();
+    notice.setName(kind);
+    notice.setBackground(background);
+    notice.setBorder(JBUI.Borders.compound(JBUI.Borders.customLineBottom(border), JBUI.Borders.empty(5, 10)));
+    noticeText.setIcon(icon);
+    noticeText.setText(html);
+    noticeText.setToolTipText(title + ". " + text);
+    if (same) return;
+    noticeLinks.removeAll();
+    for (int i = 0; i < labels.size(); i++) {
+      Runnable action = actions.get(i);
+      ActionLink link = new ActionLink(labels.get(i));
+      link.addActionListener(e -> action.run());
+      noticeLinks.add(link);
+    }
+    notice.setVisible(true);
+    notice.revalidate();
+    notice.repaint();
+  }
+
+  private void hideNotice() {
+    if (!notice.isVisible()) return;
+    notice.setVisible(false);
+    notice.setName(null);
+    noticeLinks.removeAll();
+    notice.revalidate();
+  }
+
+  /**
+   * Reload, or Stop (an X) while the page loads, as in a browser. A second click right after Reload reloads again
+   * instead of stopping (a double click shouldn't cancel the load it started).
+   */
   private final class ReloadAction extends DumbAwareAction {
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
-      if (loading) {
-        withCef(CefBrowser::stopLoad);
-        spinUntil = 0;
-        refreshReloadButton();
+      long now = System.currentTimeMillis();
+      if (loading && now - reloadClickedAt > STOP_GUARD_MS) {
+        stopLoading();
       } else {
-        // spin right away: Chromium reports the load start a moment later
-        spinUntil = System.currentTimeMillis() + MIN_SPIN_MS;
-        withCef(CefBrowser::reload);
-        refreshReloadButton();
+        reloadClickedAt = now;
+        userReload();
       }
     }
 
     @Override
     public void update(@NotNull AnActionEvent e) {
-      boolean spinning = spinning();
-      e.getPresentation().setText(loading ? "Stop" : "Reload");
-      e.getPresentation().setIcon(spinning ? RELOAD_SPINNER : AllIcons.Actions.Refresh);
+      boolean stop = loading;
+      e.getPresentation().setText(stop ? "Stop" : "Reload");
+      e.getPresentation().setIcon(stop ? AllIcons.Actions.Close : AllIcons.Actions.Refresh);
       e.getPresentation().setEnabled(browser != null);
     }
 
@@ -1194,5 +1524,9 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   @Override
   public void dispose() {
     // the browser is disposed with this editor (Disposer.register in the constructor)
+    stopWaitingForServer();
+    if (progressTimer != null) progressTimer.stop();
+    progressTimer = null;
+    BrowserFavicons.setStatus(file.id(), BrowserFavicons.Status.NORMAL);
   }
 }

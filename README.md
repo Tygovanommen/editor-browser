@@ -21,6 +21,13 @@ still there after a restart.
 - **Splits like a file:** right-click the tab › *Split Right* for code and site side by side, or two sites at once.
 - **Browser basics in every tab:** back, forward, reload, an address bar, zoom (handy in a narrow split: 80% shows
   the desktop layout) and Chrome DevTools.
+- **You can see what a page is doing:** while it loads, a progress line runs under the toolbar, the tab icon
+  spins and Reload becomes Stop (X). A server that hasn't answered after a few seconds gets a "Waiting for
+  localhost:8000" bar (paused at a breakpoint?). A page that can't load gets a red bar saying why, in words
+  (nothing running on that port, unknown host, connection closed, …), with *Try Again*, and a red tab icon. When a
+  local server refused the connection (a dev server still starting), the tab waits for it and reloads by itself
+  once it is up. An HTTP error answer shows as a 404 / 500 badge in the toolbar, and a crashed page gets a bar
+  with *Reload*.
 - **A toolbar you arrange:** the toolbar keeps to back / forward / reload, the address bar, New Tab, DevTools and a
   ⋮ menu with the rest (device width, color scheme, zoom, find, share preview, clear site data, open in default
   browser). Under

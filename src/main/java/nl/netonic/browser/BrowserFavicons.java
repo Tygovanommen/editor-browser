@@ -1,6 +1,8 @@
 package nl.netonic.browser;
 
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.ui.AnimatedIcon;
 import java.awt.Image;
 import java.io.InputStream;
 import java.net.URI;
@@ -13,18 +15,37 @@ import javax.swing.ImageIcon;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * In-memory favicon cache, keyed by tab id. Not persisted: favicons are re-fetched (from the browser's own page,
- * via {@link BrowserEditor}) each time a tab reloads or PhpStorm restarts.
+ * In-memory favicon cache, keyed by tab id, and the tab icon's load status. Not persisted: favicons are re-fetched
+ * (from the browser's own page, via {@link BrowserEditor}) each time a tab reloads or PhpStorm restarts.
  */
 final class BrowserFavicons {
+  /** What the tab icon shows instead of the favicon: a spinner while loading, an error icon when the page failed. */
+  enum Status { NORMAL, LOADING, FAILED }
+
   private static final int SIZE = 16;
   private static final Map<String, Icon> icons = new ConcurrentHashMap<>();
   private static final Map<String, String> fetchedUrls = new ConcurrentHashMap<>();
+  private static final Map<String, Status> statuses = new ConcurrentHashMap<>();
 
   private BrowserFavicons() {}
 
+  /** The tab icon: the load status's icon, else the favicon, else null (the file type's globe). */
   static @Nullable Icon get(String id) {
-    return icons.get(id);
+    return switch (status(id)) {
+      case LOADING -> AnimatedIcon.Default.INSTANCE;
+      case FAILED -> AllIcons.General.Error;
+      case NORMAL -> icons.get(id);
+    };
+  }
+
+  static Status status(String id) {
+    return statuses.getOrDefault(id, Status.NORMAL);
+  }
+
+  /** Sets the tab's load status; true when it changed (the caller then refreshes the tab). */
+  static boolean setStatus(String id, Status status) {
+    Status old = status == Status.NORMAL ? statuses.remove(id) : statuses.put(id, status);
+    return (old == null ? Status.NORMAL : old) != status;
   }
 
   /** Downloads the favicon at {@code url} on a background thread and runs {@code onFetched} on the EDT once cached. */

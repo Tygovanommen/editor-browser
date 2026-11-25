@@ -36,6 +36,8 @@ public final class CoreTests {
     test("Js: string literals and the match-count script", CoreTests::js);
     test("SharePreview: tags, fallbacks, warnings, image crop", CoreTests::sharePreview);
     test("ToolbarLayout: defaults, changes, saved form", CoreTests::toolbarLayout);
+    test("LoadErrors: which errors show, waiting for a server, sentences", CoreTests::loadErrors);
+    test("LoadErrors: HTTP statuses, site, host and port", CoreTests::loadErrorsParts);
 
     System.out.println();
     System.out.println(passed + " passed, " + failed.size() + " failed");
@@ -422,6 +424,53 @@ public final class CoreTests {
   }
 
   // --- mini framework
+
+  static void loadErrors() {
+    yes(LoadErrors.shown("ERR_CONNECTION_REFUSED"));
+    yes(LoadErrors.shown("ERR_EMPTY_RESPONSE"));
+    no(LoadErrors.shown("ERR_ABORTED"));
+    no(LoadErrors.shown("ERR_NONE"));
+    no(LoadErrors.shown("ERR_INVALID_AUTH_CREDENTIALS"));
+    no(LoadErrors.shown(null));
+    yes(LoadErrors.waitsForServer("ERR_CONNECTION_REFUSED", "http://localhost:5173/"));
+    yes(LoadErrors.waitsForServer("ERR_CONNECTION_REFUSED", "http://backend.test/admin"));
+    no(LoadErrors.waitsForServer("ERR_CONNECTION_REFUSED", "https://example.com/"));
+    no(LoadErrors.waitsForServer("ERR_EMPTY_RESPONSE", "http://localhost:5173/"));
+    eq("Nothing is answering on localhost:5173. Is the server running?",
+        LoadErrors.describe("ERR_CONNECTION_REFUSED", "http://localhost:5173/x"));
+    eq("Nothing is answering on example.com.", LoadErrors.describe("ERR_CONNECTION_REFUSED", "https://example.com/"));
+    eq("Can't find shop.test: is it in /etc/hosts or your local DNS?",
+        LoadErrors.describe("ERR_NAME_NOT_RESOLVED", "http://shop.test/"));
+    eq("Can't find exampel.com: check the address.", LoadErrors.describe("ERR_NAME_NOT_RESOLVED", "https://exampel.com/"));
+    eq("localhost:8000 can't make a secure connection. Does it only speak http://?",
+        LoadErrors.describe("ERR_SSL_PROTOCOL_ERROR", "https://localhost:8000/"));
+    eq("127.0.0.1:8765 closed the connection without an answer. Did the server crash? Check its log.",
+        LoadErrors.describe("ERR_EMPTY_RESPONSE", "http://127.0.0.1:8765/drop"));
+    eq("example.com's certificate isn't trusted.", LoadErrors.describe("ERR_CERT_AUTHORITY_INVALID", "https://example.com"));
+    eq("The page couldn't load.", LoadErrors.describe("ERR_SOMETHING_NEW", "https://example.com"));
+    eq("Can't open localhost:3000", LoadErrors.title("http://localhost:3000/a?b"));
+  }
+
+  static void loadErrorsParts() {
+    eq("404 Not Found", LoadErrors.httpStatus(404));
+    eq("500 Internal Server Error", LoadErrors.httpStatus(500));
+    eq("599", LoadErrors.httpStatus(599));
+    yes(LoadErrors.isHttpError(404));
+    yes(LoadErrors.isHttpError(503));
+    no(LoadErrors.isHttpError(200));
+    no(LoadErrors.isHttpError(304));
+    no(LoadErrors.isHttpError(0));
+    eq("localhost:5173", LoadErrors.site("http://LocalHost:5173/app"));
+    eq("example.com", LoadErrors.site("https://example.com/"));
+    eq("the page", LoadErrors.site(""));
+    eq("::1", LoadErrors.hostOf("http://[::1]:3000/"));
+    eq("localhost", LoadErrors.hostOf("http://localhost:3000/"));
+    eq(null, LoadErrors.hostOf("about:blank"));
+    eq(3000, LoadErrors.portOf("http://localhost:3000/"));
+    eq(80, LoadErrors.portOf("http://backend.test/"));
+    eq(443, LoadErrors.portOf("https://example.com"));
+    eq(-1, LoadErrors.portOf("about:blank"));
+  }
 
   private static void test(String name, Runnable body) {
     try {

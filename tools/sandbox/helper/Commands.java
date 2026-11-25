@@ -141,7 +141,37 @@ public final class Commands {
             .append('\'').append(findField.hasFocus() ? " focused" : "").append('\n');
         JBLabel errors = field(ed, "errorLabel", JBLabel.class);
         out.append("errors ").append(errors.isVisible() ? errors.getText() : "0").append('\n');
-        out.append("favicon ").append(describeIcon(favicon(ed.getFile())));
+        out.append("favicon ").append(describeIcon(favicon(ed.getFile()))).append('\n');
+        // loading: the progress line, the tab icon's status, the HTTP status badge, the notice bar (kind: text | links)
+        out.append("progress ").append(field(ed, "progress", Double.class) < 0 ? "hidden" : "shown").append('\n');
+        java.lang.reflect.Method status = Class.forName("nl.netonic.browser.BrowserFavicons").getDeclaredMethod("status", String.class);
+        status.setAccessible(true);
+        out.append("tabicon ").append(status.invoke(null, ((BrowserFile) ed.getFile()).id())).append('\n');
+        JBLabel httpStatus = field(ed, "statusLabel", JBLabel.class);
+        out.append("http ").append(httpStatus.isVisible() ? httpStatus.getText() : "-").append('\n');
+        javax.swing.JPanel notice = field(ed, "notice", javax.swing.JPanel.class);
+        JBLabel noticeText = field(ed, "noticeText", JBLabel.class);
+        javax.swing.JPanel noticeLinks = field(ed, "noticeLinks", javax.swing.JPanel.class);
+        out.append("notice ");
+        if (!notice.isVisible()) out.append("(hidden)");
+        else {
+          out.append(notice.getName()).append(": ").append(com.intellij.openapi.util.text.StringUtil.unescapeXmlEntities(noticeText.getText().replaceAll("<[^>]+>", "").replace("&nbsp;", " ").replace("&#39;", "'"))).append(" |");
+          for (Component link : noticeLinks.getComponents()) {
+            if (link instanceof com.intellij.ui.components.ActionLink a) out.append(" [").append(a.getText()).append(']');
+          }
+        }
+      }
+      // notice <link>: clicks a link of the selected browser tab's notice bar (Try Again, Stop Waiting, Stop)
+      case "notice" -> {
+        javax.swing.JPanel noticeLinks = field(selectedBrowser(), "noticeLinks", javax.swing.JPanel.class);
+        boolean hit = false;
+        for (Component link : noticeLinks.getComponents()) {
+          if (link instanceof com.intellij.ui.components.ActionLink a && a.getText().equals(arg)) {
+            a.doClick();
+            hit = true;
+          }
+        }
+        out.append(hit ? "clicked '" + arg + "'" : "no link '" + arg + "'");
       }
       // js <code>: runs JavaScript in the selected browser tab
       case "js" -> {
@@ -470,6 +500,41 @@ public final class Commands {
         }
         out.append(System.getProperty("ebdemo.loaderr", "none"));
       }
+      // loadevents [clear]: from now on records the selected browser tab's load callbacks, in order; prints them
+      case "loadevents" -> {
+        JBCefBrowser browser = field(selectedBrowser(), "browser", JBCefBrowser.class);
+        String key = "ebdemo.loadev." + browser.hashCode();
+        if ("clear".equals(arg)) System.setProperty(key, "");
+        if (System.getProperty(key + ".hooked") == null) {
+          System.setProperty(key + ".hooked", "1");
+          System.setProperty(key, "");
+          java.util.function.Consumer<String> log = s -> System.setProperty(key, System.getProperty(key, "") + s + "\n");
+          browser.getJBCefClient().addLoadHandler(new org.cef.handler.CefLoadHandlerAdapter() {
+            @Override
+            public void onLoadingStateChange(org.cef.browser.CefBrowser b, boolean loading, boolean back, boolean fwd) {
+              log.accept("state loading=" + loading + " url=" + b.getURL());
+            }
+
+            @Override
+            public void onLoadStart(org.cef.browser.CefBrowser b, org.cef.browser.CefFrame f,
+                org.cef.network.CefRequest.TransitionType t) {
+              log.accept("start main=" + f.isMain() + " " + t + " url=" + f.getURL());
+            }
+
+            @Override
+            public void onLoadEnd(org.cef.browser.CefBrowser b, org.cef.browser.CefFrame f, int status) {
+              log.accept("end main=" + f.isMain() + " status=" + status + " url=" + f.getURL());
+            }
+
+            @Override
+            public void onLoadError(org.cef.browser.CefBrowser b, org.cef.browser.CefFrame f,
+                org.cef.handler.CefLoadHandler.ErrorCode code, String text, String url) {
+              log.accept("error main=" + f.isMain() + " " + code + " url=" + url);
+            }
+          }, browser.getCefBrowser());
+        }
+        out.append(System.getProperty(key, ""));
+      }
       // reloadinfo: what reload on save sees for the selected browser tab
       case "reloadinfo" -> {
         BrowserEditor ed = selectedBrowser();
@@ -569,11 +634,14 @@ public final class Commands {
   }
 
   private static javax.swing.Icon favicon(VirtualFile file) {
-    for (com.intellij.ide.FileIconProvider p : com.intellij.ide.FileIconProvider.EP_NAME.getExtensionList()) {
-      javax.swing.Icon icon = p.getIcon(file, 0, project());
-      if (icon != null) return icon;
-    }
-    return null;
+    // in a read action: other providers (PsiBasedFileIconProvider) need one
+    return com.intellij.openapi.application.ReadAction.compute(() -> {
+      for (com.intellij.ide.FileIconProvider p : com.intellij.ide.FileIconProvider.EP_NAME.getExtensionList()) {
+        javax.swing.Icon icon = p.getIcon(file, 0, project());
+        if (icon != null) return icon;
+      }
+      return null;
+    });
   }
 
   private static String describeIcon(javax.swing.Icon icon) {
