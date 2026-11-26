@@ -417,6 +417,48 @@ c notice Reload >/dev/null
 contains "… its Reload brings the page back" "notice (hidden)" ld
 contains "… the page shows again" "* browser 'EB Second'" c tabs
 
+section "10g PDF files and PDF pages"
+PDF="$ROOT/project/doc.pdf"
+c file "$PDF" >/dev/null
+contains "a project PDF opens as a browser tab (the PDF file is the tab)" "* file doc.pdf (browser tab)" c tabs
+contains "… on its file: URL" "address file://$ROOT/project/doc.pdf" c state
+contains "… in Chromium's PDF viewer" "pdf true" c state
+contains "… *.pdf has the plugin's file type (not Native: the system's app)" "type PDF" c filetype "$PDF"
+c call openFind >/dev/null
+c settext findField "needle" >/dev/null
+sleep 2
+out=$(c state)
+[[ "$out" == *"find shown ''"* ]] && pass "find in a PDF: no wrong \"No matches\" (the viewer's text has no count)" \
+  || fail "find in a PDF: no wrong \"No matches\"" "$(echo "$out" | grep '^find')"
+c call closeFind >/dev/null
+# Chromium's zoom level mirrors the viewer's own zoom (e.g. its fit-to-page): the tab's zoom must not change it
+level=$(c state | grep '^cefZoomLevel')
+c call zoomStep 1 >/dev/null
+out=$(c state)
+[[ "$out" == *"zoomLabel (hidden)"* && "$out" == *"$level"* ]] \
+  && pass "the tab's zoom leaves a PDF alone (the viewer zooms itself)" \
+  || fail "zoom on a PDF" "before: $level, after: $(echo "$out" | grep -i zoom | tr '\n' ' ')"
+c loadevents >/dev/null; c loadevents clear >/dev/null
+cp "$ROOT/project/doc.pdf" "$ROOT/doc-3pages.pdf"
+cp "$ROOT/project/doc-1page.pdf" "$PDF"
+c refresh "$PDF" >/dev/null
+contains "the PDF changed on disk: the tab reloads it" "TT_RELOAD url=file://$ROOT/project/doc.pdf" c loadevents
+cp "$ROOT/doc-3pages.pdf" "$PDF"
+c openpdf off >/dev/null
+out=$(c filetype "$PDF")
+[[ "$out" != *"editor-browser-pdf"* ]] && pass "setting off: no browser tab for PDF files (the system's app)" \
+  || fail "setting off: no browser tab for PDF files" "$(echo "$out" | tr '\n' ' ')"
+c openpdf on >/dev/null
+c open "$SITE/doc.pdf" >/dev/null
+until_has 15 "* browser 'doc.pdf'" c tabs
+contains "a PDF link in a browser tab: Chromium's PDF viewer" "pdf true" c state
+c js "location.href='/second.html'" >/dev/null
+until_has 15 "* browser 'EB Second'" c tabs
+contains "… a page after it is no PDF" "pdf false" c state
+c open "$SITE/pdf" >/dev/null
+until_has 15 "address $SITE/pdf" c state
+contains "a PDF at a URL without .pdf (Content-Type): the viewer too" "pdf true" c state
+
 section "11 Restart"
 before=$(c tabs | grep -c "browser '")
 c layout find=toolbar >/dev/null
@@ -425,6 +467,7 @@ ready
 contains "browser tabs reopen after a restart ($before)" "browser 'EB" c tabs
 contains "the source tab reopens as page source" "browser 'view-source:127.0.0.1:$PORT/third.html' view-source:" c tabs
 contains "the HTML file tab reopens on the file" "browser 'EB Local' file://" c tabs
+contains "the PDF file tab reopens as a browser tab" "file doc.pdf (browser tab)" c tabs
 contains "the toolbar layout is kept (Find in Page on the toolbar)" "button 'Find in Page'" c buttons
 c focustab "EB Scheme dark" >/dev/null
 until_has 15 "* browser 'EB Scheme dark'" c tabs

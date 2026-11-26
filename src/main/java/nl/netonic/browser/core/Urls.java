@@ -105,6 +105,21 @@ public final class Urls {
     return ext.equals("html") || ext.equals("htm") || ext.equals("xhtml");
   }
 
+  /** True for a PDF file ({@code report.pdf}), which Chromium shows in its PDF viewer. */
+  public static boolean isPdfFile(String fileName) {
+    return extension(fileName).equals("pdf");
+  }
+
+  /**
+   * True for the frame of Chromium's built-in PDF viewer (an extension, the same id as in Chrome): a page showing
+   * a PDF has it inside.
+   */
+  public static boolean isPdfViewer(String frameUrl) {
+    return frameUrl != null && frameUrl.startsWith("chrome-extension://" + PDF_VIEWER_EXTENSION + "/");
+  }
+
+  private static final String PDF_VIEWER_EXTENSION = "mhjfbmdgcfjbbpaeojofohoefgiehjai";
+
   /** The {@code file:} URL of a local file, non-ASCII characters and spaces percent-encoded as Chromium does. */
   public static String fileUrl(Path file) {
     return file.toAbsolutePath().toUri().toASCIIString();

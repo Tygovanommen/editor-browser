@@ -97,6 +97,15 @@ public final class CoreTests {
     no(Urls.isHtmlFile("app.vue"));
     no(Urls.isHtmlFile("html"));
     no(Urls.isHtmlFile(null));
+    yes(Urls.isPdfFile("invoice.pdf"));
+    yes(Urls.isPdfFile("/work/docs/Report.PDF"));
+    no(Urls.isPdfFile("pdf"));
+    no(Urls.isPdfFile("invoice.pdf.php"));
+    no(Urls.isPdfFile(null));
+    yes(Urls.isPdfViewer("chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html"));
+    no(Urls.isPdfViewer("chrome-extension://abcdefghijklmnopabcdefghijklmnop/index.html"));
+    no(Urls.isPdfViewer("http://localhost/mhjfbmdgcfjbbpaeojofohoefgiehjai/"));
+    no(Urls.isPdfViewer(null));
     java.nio.file.Path page = java.nio.file.Path.of("/tmp/my site/café/index.html");
     String url = Urls.fileUrl(page);
     eq("file:///tmp/my%20site/caf%C3%A9/index.html", url);
@@ -272,6 +281,9 @@ public final class CoreTests {
     no(LiveReload.changesFilePage(page, List.of(java.nio.file.Path.of("/work/other/index.html"))));
     no(LiveReload.changesFilePage(page, List.of(java.nio.file.Path.of("/work/site-2/a.css"))));
     no(LiveReload.changesFilePage(null, List.of()));
+    // a PDF: no saved file next to it changes it (a PDF changed on disk reloads by PdfFileWatcher)
+    no(LiveReload.changesFilePage(java.nio.file.Path.of("/work/site/report.pdf"),
+        List.of(java.nio.file.Path.of("/work/site/report.pdf"), java.nio.file.Path.of("/work/site/build.php"))));
   }
 
   static void consoleLog() {

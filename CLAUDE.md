@@ -10,7 +10,7 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
 
 ## Status (19 Nov 2026)
 
-- Version 0.6.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
+- Version 0.7.0, id `nl.netonic.editor-browser`, vendor Netonic, `since-build` 262 (PhpStorm 2026.2+).
   Distributed via GitHub Releases + `updatePlugins.xml` (custom plugin repository), not the Marketplace.
 - Verified on PhpStorm 2026.3 (263.7307.215): `tools/api-check.sh` reports no internal / experimental / deprecated
   API use. `tools/sandbox/e2e.sh` passed 31/31 for 0.2.2. For 0.3.0 (19 Nov 2026) the last full run was 43/54:
@@ -30,6 +30,17 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   bar, wait for a local server, HTTP status badge): full `e2e.sh` 114/122; all 26 new checks (section 10f) passed.
   The 8 failures: the keyboard checks + follow-ons (`focus null`, an Open URL dialog left open), incl. "a dev server
   started in the Terminal (port 4321)", which passed when section 9 was rerun on its own.
+- 0.7.0 PDF files (25 Nov 2026): full `e2e.sh` through section 10g: 125 passed, 1 failed (the PDF zoom check,
+  whose expectation was wrong: fixed, then section 10g alone 11/11); section 11 run separately 7/8 (only "the source
+  tab reopens as page source", as above; the PDF tab reopens). The keyboard checks passed this time (focus kept).
+  Chromium's own PDF viewer (the Chrome PDF extension) works in JCEF 2026.3 OSR
+  despite `--disable-extensions`, for http(s) and `file:` PDFs, so nothing is bundled (PDF.js was considered and
+  dropped). Measured: find (`CefBrowser.find`) highlights and steps through a PDF's text; Chromium's zoom level only
+  mirrors the viewer's zoom (`setZoomLevel`, keys sent to the page, CDP key events and `#zoom=` hash changes do
+  **not** zoom it; its own − / + do); `Target.getTargets` times out on the page's DevTools client. Once (twice in
+  one session, not reproduced in 4 tries) the IDE closed all tabs and reopened the PDF tab around toggling
+  `openpdf` with a PDF tab navigated to `file:///`; cause unknown. Not verified: the viewer on 2026.2's JCEF,
+  Windows / Linux.
 - `EditorEmptyTextProvider`/`EditorEmptyTextSink` (`impl` package) are `@ApiStatus.Internal` with no stable
   replacement; don't reintroduce an empty-editor-placeholder hint through them, `api-check.sh` will flag it.
 - Not verified yet: building against 2026.2.3 in the release workflow (the Linux tarball's JCEF folder is matched
@@ -44,6 +55,10 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   scheme (`schemes`, absent = system), plus the
   recent typed addresses (15). Entries are not removed when a tab closes (closing a project closes its tabs too,
   which would lose them for the restart); the oldest are pruned past 200.
+- A local PDF file's tab is the PDF `VirtualFile` itself (`PdfEditorProvider`), not a `BrowserFile`: its
+  `BrowserEditor` keeps its state in `BrowserStore` under `pdf-` + 12 hex of SHA-1(path) (`PdfEditorProvider.tabId`),
+  set to the PDF's `file:` URL whenever the editor is created. `findTabByHost` / `findTabByFile` and
+  `BrowserFileSystem.findFileByPath` skip `pdf-` ids.
 - Split Right on a browser tab gives a second `BrowserEditor` (second Chromium) for the same file / id: both write
   the same store entry; the last navigation wins for the tab title and the restart.
 
@@ -56,7 +71,8 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   `viewSource` / `isViewSource`, `isHtmlFile` / `fileUrl` / `localPath` (local files as `file:` URLs and back; the
   label of a `file:` URL is the file name).
 - `BrowserFileSystem`, `BrowserFile`, `BrowserFileType` (globe icon, registered without extensions).
-- `BrowserEditorProvider` (`HIDE_DEFAULT_EDITOR`) → `BrowserEditor`: toolbar (back / forward / reload-stop),
+- `BrowserEditorProvider` (`HIDE_DEFAULT_EDITOR`) → `BrowserEditor(project, file, id)` (any `VirtualFile` as the
+  tab, `id` = store key): toolbar (back / forward / reload-stop),
   address bar, zoom label + buttons, open in default browser, DevTools; Chromium handlers: address / title change
   → store + `updateFilePresentation`, loading state → button state + re-apply zoom, `onBeforePopup` → new tab,
   context menu *View Page Source* → `view-source:<url>` in a new tab (CEF's own handling writes a temp file for the
@@ -116,6 +132,19 @@ This plugin makes each site a (virtual) file instead, so it is a real editor tab
   ⋮; closed by `deselectNotify`) draws the card and downloads `og:image` itself, as the apps' crawlers do (no
   browser cookies; ImageIO: PNG / JPEG / GIF, not WebP), cropped to 1.91 : 1. In a `JComponent` subclass a bare
   `WIDTH` / `HEIGHT` is `ImageObserver`'s constant (1 / 2), not an outer class's: hence `CARD_WIDTH`.
+- PDF: Chromium shows a PDF in its viewer, an extension frame (`Urls.isPdfViewer`,
+  `chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/`) whose `onLoadStart` sets `BrowserEditor.pdfPage` (cleared
+  by the main frame's). On a PDF page: no find count (`Js.countMatches` sees no text: shows nothing, not "No
+  matches"), zoom actions disabled / ⌘+ gives a status-bar hint and `applyZoom` is skipped (see Status), zoom label
+  hidden. PhpStorm types `*.pdf` as `Native` (`OpenFileDescriptor.navigate` → system app, no editor provider
+  asked): `PdfFileType` (plugin.xml `extensions="pdf"`, implements `INativeFileType`) takes it over and, with
+  `BrowserStore.openPdfFiles` (default on, Settings checkbox) opens the editor via
+  `OpenFileDescriptor.navigateInEditor` (the `FileEditorManager.openFile*` / `openEditor` overloads are deprecated in
+  2026.3), else `NativeFileType.openAssociatedApplication` as before. `PdfEditorProvider` accepts local `.pdf` files
+  while the setting is on. `PdfFileWatcher` (application `BulkFileListener`): content change / create of a `.pdf`
+  → `BrowserEditor.reloadForChangedFiles` (tabs showing that file; hidden ones in `selectNotify`) — VFS changes on
+  purpose here, only the PDF itself counts so it can't loop; `LiveReload.changesFilePage` is false for a PDF.
+  `OpenFileAction` also takes `.pdf` (its own tab with the setting on, else a `BrowserFile` tab on the `file:` URL).
 - Reload on save: `ReloadOnSave` (application `FileDocumentManagerListener.afterDocumentSaved`, setting
   `BrowserStore.reloadOnSave`, default on) collects saves for 300 ms, keeps those in a project's content and calls
   `BrowserEditor.reloadAfterSave`: a local page (`Urls.isLocal`) reloads, a `file:` page when the saved file is in
@@ -168,9 +197,12 @@ tools/sandbox/e2e.sh     # macOS: sandboxed PhpStorm (own config under /tmp/ebde
 - Classpath = `lib/` + the JCEF plugin's `lib/` (`plugins/*jcef*/lib`, `jcef-plugin` on macOS 2026.3).
 - Sandbox (`tools/sandbox/`): `demo.sh` starts PhpStorm with its own config/system/plugins and serves
   `/tmp/ebdemo/site` on `127.0.0.1:8765` (`EBDEMO_PORT`; `server.py`, basic auth `eb` / `secret` on `/auth/`, and
-  `/slow/<ms>`, `/stall/<ms>` (an image that takes that long), `/status/<code>`, `/drop` (no answer)); `cmd.sh <command>` talks to the helper plugin
+  `/slow/<ms>`, `/stall/<ms>` (an image that takes that long), `/status/<code>`, `/drop` (no answer), `/pdf` (a
+  PDF without `.pdf` in the URL)); `demo.sh` writes small test PDFs (`project/doc.pdf`, `site/doc.pdf`); `cmd.sh <command>` talks to the helper plugin
   (`helper/Commands.java`: `open`, `tabs`, `state`, `js`, `click x y`, `rclick x y` (Chromium's context menu),
   `buttons` (the tab's visible toolbar buttons), `layout default | item=place …` (set the toolbar layout),
+  `filetype <path>` (file type + editor providers of a file), `refresh <path>` (VFS refresh, as on window
+  activation), `openpdf on|off` (the PDF setting), `pagekey <keystroke>` (a key straight to Chromium's component),
   `auth [user password | cancel]` (the Sign In dialog's text, or fill in / cancel it), `cdp <method> [json]` (a
   DevTools protocol call), `loaderrors` (record / print Chromium load errors), `loadevents [clear]` (record / print every load callback, in
   order), `notice <link>` (click a link of the notice bar; `state` prints `progress`, `tabicon`, `http`, `notice`),
@@ -178,8 +210,8 @@ tools/sandbox/e2e.sh     # macOS: sandboxed PhpStorm (own config under /tmp/ebde
   `key`, `file`, `select`, `shot`, `quit`; `demo.sh --probe` reloads it without a restart). JCEF runs off-screen
   (OSR) there, so `shot` (Swing paint) includes the page. A script `click()` on a `target=_blank` link is blocked
   as a popup without a user gesture: use `click x y` (real mouse event) for that.
-  Without keyboard focus (`focus null`: another app in front) use the focus-free commands: `call <method>` (a
-  no-argument method of the selected `BrowserEditor`, e.g. `openFind`), `settext <field> <text>`, `save <path>`
+  Without keyboard focus (`focus null`: another app in front) use the focus-free commands: `call <method> [arg]` (a
+  method of the selected `BrowserEditor` with no argument or one int / boolean, e.g. `openFind`, `zoomStep 1`), `settext <field> <text>`, `save <path>`
   (edit + save a project file, as ⌘S), `focustab <title>`, `reloadinfo`, `closedialogs`, `popup [close | sizes |
   shot <file>]` (the Share Preview popover's text; `shot` paints it, the window `shot` doesn't include popups). A dialog left open by a
   failed keyboard check holds back every later `invokeLater` (default modality), so unrelated checks fail after it:

@@ -28,8 +28,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Settings › Tools › Editor Browser: automatic dev-server tabs, reloading local tabs on save, and where each optional
- * toolbar item goes ({@link ToolbarLayout}: toolbar, ⋮ menu or hidden).
+ * Settings › Tools › Editor Browser: automatic dev-server tabs, reloading local tabs on save, PDF files in a
+ * browser tab, and where each optional toolbar item goes ({@link ToolbarLayout}: toolbar, ⋮ menu or hidden).
  */
 public final class BrowserConfigurable implements Configurable {
   private final JBCheckBox autoOpen = new JBCheckBox(
@@ -41,6 +41,10 @@ public final class BrowserConfigurable implements Configurable {
           + "<small>Tabs on localhost, an IP, .test, .local or .localhost; a tab in the background reloads when you "
           + "switch to it. Pages that reload themselves (Vite, webpack HMR, LiveReload, Browsersync) only reload "
           + "for server-side files such as PHP, Twig or Blade</small></html>");
+  private final JBCheckBox openPdf = new JBCheckBox(
+      "<html>Open PDF files in a browser tab<br>"
+          + "<small>Chromium's PDF viewer, next to your code: find in the PDF, zoom, page thumbnails, print. "
+          + "Off: PDF files open in the system's PDF app</small></html>");
   private final Map<Item, ComboBox<Place>> places = new EnumMap<>(Item.class);
 
   @Override
@@ -51,6 +55,7 @@ public final class BrowserConfigurable implements Configurable {
   @Override
   public @Nullable JComponent createComponent() {
     FormBuilder form = FormBuilder.createFormBuilder().addComponent(autoOpen).addComponent(reloadOnSave)
+        .addComponent(openPdf)
         .addComponent(new TitledSeparator("Browser Tab Toolbar"));
     JBLabel hint = new JBLabel("Back, forward, reload and the address bar are always shown. Shortcuts keep working "
         + "for hidden items.");
@@ -72,6 +77,7 @@ public final class BrowserConfigurable implements Configurable {
   public boolean isModified() {
     BrowserStore store = BrowserStore.getInstance();
     return autoOpen.isSelected() != store.isAutoOpenDevServer() || reloadOnSave.isSelected() != store.isReloadOnSave()
+        || openPdf.isSelected() != store.isOpenPdfFiles()
         || !layout().equals(store.toolbarLayout());
   }
 
@@ -80,6 +86,7 @@ public final class BrowserConfigurable implements Configurable {
     BrowserStore store = BrowserStore.getInstance();
     store.setAutoOpenDevServer(autoOpen.isSelected());
     store.setReloadOnSave(reloadOnSave.isSelected());
+    store.setOpenPdfFiles(openPdf.isSelected());
     ToolbarLayout layout = layout();
     if (!layout.equals(store.toolbarLayout())) {
       store.setToolbarLayout(layout);
@@ -97,6 +104,7 @@ public final class BrowserConfigurable implements Configurable {
     BrowserStore store = BrowserStore.getInstance();
     autoOpen.setSelected(store.isAutoOpenDevServer());
     reloadOnSave.setSelected(store.isReloadOnSave());
+    openPdf.setSelected(store.isOpenPdfFiles());
     show(store.toolbarLayout());
   }
 

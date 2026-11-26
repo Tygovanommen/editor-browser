@@ -54,6 +54,7 @@ import java.awt.event.MouseEvent;
 import java.beans.PropertyChangeListener;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -135,7 +136,10 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       })()""";
 
   private final Project project;
-  private final BrowserFile file;
+  /** The tab: a {@link BrowserFile}, or a local PDF file shown in Chromium's PDF viewer ({@link PdfEditorProvider}). */
+  private final VirtualFile file;
+  /** The tab's key in {@link BrowserStore} (URL, zoom, …) and {@link BrowserFavicons}. */
+  private final String id;
   private final BrowserStore store = BrowserStore.getInstance();
   private final JPanel root = new JPanel(new BorderLayout());
   private final JBTextField address = new JBTextField();
@@ -218,15 +222,26 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private @Nullable ActionToolbar sideToolbar;
   private volatile boolean canGoBack;
   private volatile boolean canGoForward;
+  /**
+   * The page is a PDF in Chromium's PDF viewer (from its extension frame starting to load, see {@code onLoadStart}).
+   * Find in page still works there, but the match count can't be read ({@link #runFind}).
+   */
+  private volatile boolean pdfPage;
   /** The page has a dev-server client that reloads it (see {@link #LIVE_RELOAD_JS}). */
   private volatile boolean pageReloadsItself;
   /** A project file was saved while this tab was in the background: reload when it is shown; UI thread only. */
   private boolean reloadWhenShown;
 
   BrowserEditor(@NotNull Project project, @NotNull BrowserFile file) {
+    this(project, file, file.id());
+  }
+
+  /** A tab for {@code file} that keeps its state under {@code id}; {@link BrowserStore} has its URL to load. */
+  BrowserEditor(@NotNull Project project, @NotNull VirtualFile file, @NotNull String id) {
     this.project = project;
     this.file = file;
-    String url = file.url();
+    this.id = id;
+    String url = url();
     sourceView = Urls.isViewSource(url);
     address.setText(url);
 
@@ -248,7 +263,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       public void onAddressChange(CefBrowser b, CefFrame frame, String newUrl) {
         if (frame != null && !frame.isMain()) return;
         String shown = sourceView && Urls.viewSource(newUrl) != null ? Urls.viewSource(newUrl) : newUrl;
-        store.setUrl(file.id(), shown);
+        store.setUrl(id, shown);
         onEdt(() -> {
           if (!address.hasFocus()) address.setText(shown);
           refreshTab();
@@ -258,7 +273,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       @Override
       public void onTitleChange(CefBrowser b, String title) {
         // Chromium reports "about:blank" itself as the title; keep showing "New Tab" (Urls.label) instead
-        if (!Urls.BLANK.equalsIgnoreCase(title)) store.setTitle(file.id(), title);
+        if (!Urls.BLANK.equalsIgnoreCase(title)) store.setTitle(id, title);
         onEdt(BrowserEditor.this::refreshTab);
       }
 
@@ -274,7 +289,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     }, cef);
     JBCefJSQuery faviconQuery = JBCefJSQuery.create((JBCefBrowserBase) browser);
     faviconQuery.addHandler(result -> {
-      BrowserFavicons.fetch(file.id(), result, this::refreshTab);
+      BrowserFavicons.fetch(id, result, this::refreshTab);
       return null;
     });
     Disposer.register(this, faviconQuery);
@@ -321,15 +336,25 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
       @Override
       public void onLoadStart(CefBrowser b, CefFrame frame, CefRequest.TransitionType transitionType) {
-        if (frame == null || !frame.isMain()) return;
+        if (frame == null) return;
+        if (!frame.isMain()) {
+          // Chromium's PDF viewer: an extension frame inside the page
+          if (Urls.isPdfViewer(frame.getURL())) {
+            pdfPage = true;
+            onEdt(BrowserEditor.this::updateZoomLabel);
+          }
+          return;
+        }
         // the server answered: a new page (Chromium's error page for a failed load doesn't get here)
         committed = true;
         httpStatus = 0;
+        pdfPage = false;
         // a new page: its own console errors and dev-server client
         console.clear();
         pageReloadsItself = false;
         onEdt(() -> {
           updateErrorLabel();
+          updateZoomLabel();
           pageLoaded();
         });
         // the emulation outlives navigations; set again in case Chromium started a new renderer for this page
@@ -437,7 +462,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   /** Loads an already-normalized URL without touching the recent-addresses list, e.g. a detected dev server. */
   public void loadUrl(String url) {
     sourceView = Urls.isViewSource(url);
-    store.setUrl(file.id(), url);
+    store.setUrl(id, url);
     address.setText(url);
     if (browser != null) {
       browser.loadURL(url);
@@ -457,7 +482,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
    */
   void reloadAfterSave(List<Path> saved) {
     if (browser == null) return;
-    String url = file.url();
+    String url = url();
     Path page = Urls.localPath(Urls.isViewSource(url) ? url.substring(Urls.VIEW_SOURCE.length()) : url);
     boolean reload = page != null
         ? LiveReload.changesFilePage(page, saved)
@@ -466,6 +491,24 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     if (!reload) return;
     if (root.isShowing()) reload();
     else reloadWhenShown = true;
+  }
+
+  /**
+   * Files changed on disk ({@link PdfFileWatcher}): reloads the page when it shows one of them from disk, or when
+   * it is shown again if the tab is in the background.
+   */
+  void reloadForChangedFiles(Set<Path> changed) {
+    if (browser == null) return;
+    Path page = Urls.localPath(url());
+    if (page == null || !changed.contains(page.toAbsolutePath().normalize())) return;
+    if (root.isShowing()) reloadNow();
+    else reloadWhenShown = true;
+  }
+
+  /** The page's current URL (as the address bar shows it), {@code about:blank} when unknown. */
+  private @NotNull String url() {
+    String url = store.url(id);
+    return url != null ? url : Urls.BLANK;
   }
 
   private void refreshTab() {
@@ -483,11 +526,15 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   // --- zoom (Chromium zoom level: 0 = 100%, each step ×1.2)
 
   private int zoom() {
-    return store.zoom(file.id());
+    return store.zoom(id);
   }
 
   private void setZoom(int percent) {
-    store.setZoom(file.id(), percent);
+    if (pdfPage) {
+      pdfZoomHint();
+      return;
+    }
+    store.setZoom(id, percent);
     applyZoom();
     updateZoomLabel();
     // a device width is in CSS px, so its column grows and shrinks with the zoom
@@ -497,15 +544,28 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   private void updateZoomLabel() {
     int z = zoom();
     zoomLabel.setText(z + "%");
-    zoomLabel.setVisible(z != 100);
+    zoomLabel.setVisible(z != 100 && !pdfPage);
+  }
+
+  /**
+   * Chromium's PDF viewer has a zoom of its own, which Chromium's zoom level doesn't change (nor do keys sent to it):
+   * the tab's zoom is left alone on a PDF, and its zoom actions point to the viewer's buttons.
+   */
+  private void pdfZoomHint() {
+    status("Zoom a PDF with the − / + buttons in the viewer's toolbar");
   }
 
   private void applyZoom() {
+    if (pdfPage) return;
     double level = Math.log(zoom() / 100.0) / Math.log(1.2);
     withCef(c -> c.setZoomLevel(level));
   }
 
   private void zoomStep(int direction) {
+    if (pdfPage) {
+      pdfZoomHint();
+      return;
+    }
     int current = zoom();
     int next = current;
     if (direction > 0) {
@@ -519,11 +579,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   // --- device width (the page laid out at a phone / tablet / laptop width, centred in the tab)
 
   private int deviceWidth() {
-    return store.width(file.id());
+    return store.width(id);
   }
 
   private void setDeviceWidth(int cssWidth) {
-    store.setWidth(file.id(), cssWidth);
+    store.setWidth(id, cssWidth);
     updateWidthLabel();
     relayoutViewport();
   }
@@ -621,11 +681,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   // --- light / dark mode (what the page sees as prefers-color-scheme)
 
   private ColorScheme colorScheme() {
-    return store.colorScheme(file.id());
+    return store.colorScheme(id);
   }
 
   private void setColorScheme(ColorScheme scheme) {
-    store.setColorScheme(file.id(), scheme);
+    store.setColorScheme(id, scheme);
     applyColorScheme();
     updateSchemeLabel();
   }
@@ -679,7 +739,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
    * empties the HTTP cache, then reloads: a fresh first visit, e.g. logged out. Only for http(s) pages.
    */
   private void clearSiteData() {
-    String origin = Urls.origin(file.url());
+    String origin = Urls.origin(url());
     if (origin == null) return;
     devTools("Storage.clearDataForOrigin", "{\"origin\":\"" + origin + "\",\"storageTypes\":\"all\"}")
         .thenCompose(r -> devTools("Network.clearBrowserCache", null))
@@ -746,6 +806,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       return;
     }
     withCef(c -> c.find(text, forward, false, next));
+    if (pdfPage) {
+      // the viewer's text isn't in the page's DOM, so no count; Chromium still highlights and steps
+      findCount.setText("");
+      return;
+    }
     JBCefJSQuery query = findCountQuery;
     if (!next && query != null) withCef(c -> c.executeJavaScript(query.inject(Js.countMatches(text, seq)), c.getURL(), 0));
   }
@@ -877,7 +942,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
           navigate(address.getText());
           e.consume();
         } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
-          address.setText(file.url());
+          address.setText(url());
           if (browser != null) browser.getComponent().requestFocusInWindow();
           e.consume();
         }
@@ -1021,7 +1086,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
           ? List.of(
               withKeys(action("Zoom In", AllIcons.General.ZoomIn, shown, this::canZoomIn, () -> zoomStep(1)), mod + " EQUALS"),
               withKeys(action("Zoom Out", AllIcons.General.ZoomOut, shown, this::canZoomOut, () -> zoomStep(-1)), mod + " MINUS"),
-              withKeys(action("Actual Size", AllIcons.General.ActualZoom, shown, () -> zoom() != 100, () -> setZoom(100)), mod + " 0"))
+              withKeys(action("Actual Size", AllIcons.General.ActualZoom, shown, () -> zoom() != 100 && !pdfPage, () -> setZoom(100)), mod + " 0"))
           : List.of(
               withKeys(action("Zoom Out", AllIcons.General.ZoomOut, shown, this::canZoomOut, () -> zoomStep(-1)), mod + " MINUS"),
               withKeys(action("Zoom In", AllIcons.General.ZoomIn, shown, this::canZoomIn, () -> zoomStep(1)), mod + " EQUALS"));
@@ -1040,7 +1105,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
         public void update(@NotNull AnActionEvent e) {
           boolean visible = shown.getAsBoolean();
           e.getPresentation().setVisible(visible);
-          e.getPresentation().setEnabled(visible && browser != null && !Urls.BLANK.equalsIgnoreCase(file.url()));
+          e.getPresentation().setEnabled(visible && browser != null && !Urls.BLANK.equalsIgnoreCase(url()));
         }
 
         @Override
@@ -1050,13 +1115,13 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
       });
       case CLEAR_SITE_DATA -> {
         DumbAwareAction a = action("Clear Site Data", AllIcons.Actions.ClearCash, shown,
-            () -> browser != null && Urls.origin(file.url()) != null, this::clearSiteData);
+            () -> browser != null && Urls.origin(url()) != null, this::clearSiteData);
         a.getTemplatePresentation().setDescription(
             "Deletes this site's cookies and storage, empties the browser cache and reloads");
         yield List.of(a);
       }
       case OPEN_EXTERNAL -> List.of(action("Open in Default Browser", AllIcons.Ide.External_link_arrow, shown, () -> true,
-          () -> BrowserUtil.browse(file.url())));
+          () -> BrowserUtil.browse(url())));
       case DEVTOOLS -> List.of(withKeys(
           action("Open DevTools", AllIcons.Toolwindows.ToolWindowInspection, shown, () -> browser != null, devTools), "F12"));
       case DEVICE_WIDTH, COLOR_SCHEME -> throw new IllegalArgumentException("a group, see deviceWidthGroup / colorSchemeGroup");
@@ -1064,11 +1129,11 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   }
 
   private boolean canZoomIn() {
-    return zoom() < ZOOM_STEPS[ZOOM_STEPS.length - 1];
+    return !pdfPage && zoom() < ZOOM_STEPS[ZOOM_STEPS.length - 1];
   }
 
   private boolean canZoomOut() {
-    return zoom() > ZOOM_STEPS[0];
+    return !pdfPage && zoom() > ZOOM_STEPS[0];
   }
 
   /** Shows the keystroke in the tooltip / menu; no component, so this doesn't bind it (see registerShortcuts). */
@@ -1208,7 +1273,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     BrowserFavicons.Status status = spinning() ? BrowserFavicons.Status.LOADING
         : failedError != null || crashed != null || httpStatus >= 500 ? BrowserFavicons.Status.FAILED
         : BrowserFavicons.Status.NORMAL;
-    if (BrowserFavicons.setStatus(file.id(), status)) refreshTab();
+    if (BrowserFavicons.setStatus(id, status)) refreshTab();
   }
 
   private void updateStatusLabel() {
@@ -1286,7 +1351,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
 
   private void showWaitingNotice(long seconds) {
     String text = "No answer yet" + (seconds >= 5 ? " after " + seconds + " s" : "") + "."
-        + (Urls.isLocal(file.url()) ? " Paused at a breakpoint, or a slow request?" : "");
+        + (Urls.isLocal(url()) ? " Paused at a breakpoint, or a slow request?" : "");
     showNotice("waiting", JBUI.CurrentTheme.Banner.INFO_BACKGROUND, JBUI.CurrentTheme.Banner.INFO_BORDER_COLOR,
         AnimatedIcon.Default.INSTANCE, "Waiting for " + LoadErrors.site(currentLoadUrl()), text,
         List.of("Stop"), List.of(this::stopLoading));
@@ -1295,7 +1360,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   /** The URL being loaded: what the address bar shows unless the user is typing there, else the tab's URL. */
   private String currentLoadUrl() {
     String cef = browser == null ? null : browser.getCefBrowser().getURL();
-    return cef != null && !cef.isBlank() ? cef : file.url();
+    return cef != null && !cef.isBlank() ? cef : url();
   }
 
   /** Chromium's page process ended: the page is gone (blank or a sad face) until it is reloaded. UI thread only. */
@@ -1473,7 +1538,7 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
   @Override
   public @Nullable JComponent getPreferredFocusedComponent() {
     // a blank tab (just opened, nothing typed yet) starts with the address bar focused, ready to type into
-    if (browser == null || Urls.BLANK.equalsIgnoreCase(file.url())) return address;
+    if (browser == null || Urls.BLANK.equalsIgnoreCase(url())) return address;
     return browser.getComponent();
   }
 
@@ -1527,6 +1592,6 @@ public final class BrowserEditor extends UserDataHolderBase implements FileEdito
     stopWaitingForServer();
     if (progressTimer != null) progressTimer.stop();
     progressTimer = null;
-    BrowserFavicons.setStatus(file.id(), BrowserFavicons.Status.NORMAL);
+    BrowserFavicons.setStatus(id, BrowserFavicons.Status.NORMAL);
   }
 }

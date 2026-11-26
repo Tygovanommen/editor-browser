@@ -69,6 +69,13 @@ still there after a restart.
   *Open In › Browser Tab*, or click the globe in the HTML editor's floating browser bar. The file is shown from disk
   (`file://`), so relative CSS, scripts and images load. Running it again focuses and reloads that tab, and saving
   the page or a file in its folder reloads it.
+- **PDF files in a tab:** double-click a PDF in the project (or open it from *Go to File*, a link, …) and it opens
+  as an editor tab in Chromium's PDF viewer instead of your system's PDF app: page thumbnails, zoom (the viewer's
+  − / + and fit buttons), rotate, print and download, and ⌘F to find text in it (matches are highlighted and stepped
+  through; there is no match count for a PDF). The tab is the PDF file itself, so it splits and comes back after a
+  restart like any file, and it reloads when the PDF changes on disk (e.g. a report you generate again). A link to a
+  PDF in any browser tab shows it in the same viewer. Turn it off under Settings › Tools › Editor Browser to have
+  PDFs open in the system's app again.
 - **Looks like a tab:** the page's own favicon becomes the tab icon.
 - **Dev servers open themselves:** start one and it opens as a tab, reusing the tab on a restart. From a run
   configuration, the `localhost` URL it prints is used. From the Terminal (or anywhere else), a common dev-server

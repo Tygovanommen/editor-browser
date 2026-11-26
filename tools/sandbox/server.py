@@ -4,6 +4,7 @@ plus a few endpoints for the loading / error checks of e2e.sh:
   /stall/<ms>     a page whose image takes <ms> milliseconds: the page shows, but its load doesn't end until then
   /status/<code>  a page with that HTTP status (e.g. 404, 500)
   /drop           closes the connection without an answer (Chromium: ERR_EMPTY_RESPONSE)
+  /pdf            doc.pdf as application/pdf at a URL without .pdf (as a download.php?id=… would)
    python3 -I tools/sandbox/server.py <port> <folder>
 """
 import base64
@@ -53,6 +54,15 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.startswith("/status/"):
             code = self.number("/status/") or 500
             self.wfile.write(self.send_page(code, f"EB Status {code}"))
+            return None
+        if self.path.startswith("/pdf"):
+            with open(f"{self.directory}/doc.pdf", "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
             return None
         if self.path.startswith("/drop"):
             self.close_connection = True

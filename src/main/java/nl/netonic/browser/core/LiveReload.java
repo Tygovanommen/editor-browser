@@ -27,10 +27,12 @@ public final class LiveReload {
 
   /**
    * True when a saved file can change a page shown from disk ({@code file:///…/index.html}): it is in the page's
-   * folder or below (the page itself, its CSS, JS, images).
+   * folder or below (the page itself, its CSS, JS, images). Never for a PDF: no file next to it changes it, and
+   * the PDF itself isn't saved from an editor (a PDF that changes on disk reloads by {@code PdfFileWatcher}).
    */
   public static boolean changesFilePage(Path page, Collection<Path> saved) {
     if (page == null || saved == null) return false;
+    if (page.getFileName() != null && Urls.isPdfFile(page.getFileName().toString())) return false;
     Path folder = page.toAbsolutePath().normalize().getParent();
     if (folder == null) return false;
     for (Path p : saved) if (p != null && p.toAbsolutePath().normalize().startsWith(folder)) return true;

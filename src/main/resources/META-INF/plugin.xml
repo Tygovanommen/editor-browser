@@ -1,7 +1,7 @@
 <idea-plugin>
   <id>nl.netonic.editor-browser</id>
   <name>Editor Browser</name>
-  <version>0.6.0</version>
+  <version>0.7.0</version>
   <vendor url="https://netonic.nl">Netonic</vendor>
   <idea-version since-build="262"/>
 
@@ -33,6 +33,9 @@
       <li>Tabs come back after a restart on the page you left them; logins are shared by all tabs.</li>
       <li>Right-click a selected URL in code › <i>Open in Editor Tab</i>.</li>
       <li>Right-click an HTML file › <i>Open In › Browser Tab</i> shows it as a page, straight from disk.</li>
+      <li>PDF files open as an editor tab in Chromium's PDF viewer (thumbnails, zoom, find, print) instead of the
+          system's PDF app, and reload when they change on disk; toggle under Settings › Tools › Editor
+          Browser.</li>
       <li>Starting a dev server opens it as a tab automatically, both from a run configuration (its printed
           <code>localhost</code> URL) and from the Terminal (<code>npm run dev</code>, <code>php -S</code>, … on a
           common dev-server port such as 5173, 3000 or 8000); toggle this under Settings › Tools › Editor
@@ -43,6 +46,20 @@
   ]]></description>
 
   <change-notes><![CDATA[
+    <p>0.7.0</p>
+    <ul>
+      <li>PDF files open in a browser tab: double-click a PDF in the project (or open it any other way) and it shows
+          as an editor tab in Chromium's PDF viewer, with page thumbnails, zoom, rotate, print and download, instead
+          of in the system's PDF app. On by default; Settings › Tools › Editor Browser › <i>Open PDF files in a
+          browser tab</i>. The tab is the PDF file itself: it splits, and comes back after a restart, like any
+          file.</li>
+      <li>A PDF tab reloads when its file changes on disk, e.g. a report or invoice you generate again.</li>
+      <li>Find in page (⌘F) works in a PDF: it highlights the matches and steps through them. It shows no match
+          count there (the viewer doesn't report one) rather than "No matches".</li>
+      <li>On a PDF the tab's zoom buttons and ⌘+ / ⌘− are off (they didn't change the PDF): the viewer's own
+          − / + zoom it.</li>
+      <li><i>Open In › Browser Tab</i> also for PDF files.</li>
+    </ul>
     <p>0.6.0</p>
     <ul>
       <li>Loading is visible: a progress line under the toolbar and a spinning tab icon while a page loads, and
@@ -143,6 +160,9 @@
     <virtualFileSystem key="editor-browser" implementationClass="nl.netonic.browser.BrowserFileSystem"/>
     <fileType name="EditorBrowserPage" implementationClass="nl.netonic.browser.BrowserFileType" fieldName="INSTANCE"/>
     <fileEditorProvider implementation="nl.netonic.browser.BrowserEditorProvider"/>
+    <!-- *.pdf: PhpStorm's "Native" type would open it in the system's app without asking an editor -->
+    <fileType name="PDF" implementationClass="nl.netonic.browser.PdfFileType" fieldName="INSTANCE" extensions="pdf"/>
+    <fileEditorProvider implementation="nl.netonic.browser.PdfEditorProvider"/>
     <editorTabTitleProvider implementation="nl.netonic.browser.BrowserTabTitleProvider"/>
     <fileIconProvider implementation="nl.netonic.browser.BrowserFaviconProvider"/>
     <applicationConfigurable parentId="tools" id="nl.netonic.browser.BrowserConfigurable" displayName="Editor Browser"
@@ -151,6 +171,7 @@
 
   <applicationListeners>
     <listener class="nl.netonic.browser.ReloadOnSave" topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
+    <listener class="nl.netonic.browser.PdfFileWatcher" topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
   </applicationListeners>
 
   <projectListeners>
@@ -171,7 +192,7 @@
       <keyboard-shortcut keymap="$default" first-keystroke="control alt shift U"/>
     </action>
     <action id="EditorBrowser.OpenFile" class="nl.netonic.browser.actions.OpenFileAction"
-            text="Open in Browser Tab" description="Show this HTML file as a page in a browser tab"
+            text="Open in Browser Tab" description="Show this HTML file as a page, or this PDF, in a browser tab"
             icon="AllIcons.General.Web">
       <!-- "Open In" in the project view, editor and editor tab right-click menus, after "Browser" -->
       <add-to-group group-id="RevealGroup" anchor="last"/>

@@ -103,6 +103,7 @@ public final class Commands {
                 .append(" editors=").append(fem.getAllEditors(f).length);
           } else {
             out.append("file ").append(f.getName());
+            for (FileEditor e : fem.getAllEditors(f)) if (e instanceof BrowserEditor) out.append(" (browser tab)");
           }
           out.append('\n');
         }
@@ -132,6 +133,7 @@ public final class Commands {
         out.append("cef ").append(browser == null ? "none" : browser.getCefBrowser().getURL()).append('\n');
         out.append("cefZoomLevel ").append(browser == null ? "-" : browser.getCefBrowser().getZoomLevel()).append('\n');
         out.append("loading ").append(field(ed, "loading", Boolean.class)).append('\n');
+        out.append("pdf ").append(field(ed, "pdfPage", Boolean.class)).append('\n');
         out.append("focus ").append(describe(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner())).append('\n');
         // find bar: shown / hidden, its match count, whether its field has focus; the console error badge
         javax.swing.JPanel findBar = field(ed, "findBar", javax.swing.JPanel.class);
@@ -146,7 +148,7 @@ public final class Commands {
         out.append("progress ").append(field(ed, "progress", Double.class) < 0 ? "hidden" : "shown").append('\n');
         java.lang.reflect.Method status = Class.forName("nl.netonic.browser.BrowserFavicons").getDeclaredMethod("status", String.class);
         status.setAccessible(true);
-        out.append("tabicon ").append(status.invoke(null, ((BrowserFile) ed.getFile()).id())).append('\n');
+        out.append("tabicon ").append(status.invoke(null, field(ed, "id", String.class))).append('\n');
         JBLabel httpStatus = field(ed, "statusLabel", JBLabel.class);
         out.append("http ").append(httpStatus.isVisible() ? httpStatus.getText() : "-").append('\n');
         javax.swing.JPanel notice = field(ed, "notice", javax.swing.JPanel.class);
@@ -287,6 +289,18 @@ public final class Commands {
         q.postEvent(new KeyEvent(c, KeyEvent.KEY_RELEASED, t + 20, ks.getModifiers(), ks.getKeyCode(), KeyEvent.CHAR_UNDEFINED));
         out.append("stroke ").append(ks).append(" to ").append(describe(c));
       }
+      // pagekey <keystroke>: a key press straight to the selected tab's Chromium component (no focus needed; the IDE's
+      // shortcuts don't see it), e.g. pagekey "meta EQUALS"
+      case "pagekey" -> {
+        JBCefBrowser browser = field(selectedBrowser(), "browser", JBCefBrowser.class);
+        Component c = browser.getCefBrowser().getUIComponent();
+        javax.swing.KeyStroke ks = javax.swing.KeyStroke.getKeyStroke(arg);
+        if (ks == null) throw new IllegalArgumentException("bad keystroke " + arg);
+        long t = System.currentTimeMillis();
+        c.dispatchEvent(new KeyEvent(c, KeyEvent.KEY_PRESSED, t, ks.getModifiers(), ks.getKeyCode(), KeyEvent.CHAR_UNDEFINED));
+        c.dispatchEvent(new KeyEvent(c, KeyEvent.KEY_RELEASED, t + 20, ks.getModifiers(), ks.getKeyCode(), KeyEvent.CHAR_UNDEFINED));
+        out.append("pagekey ").append(ks);
+      }
       // toolbar [click]: the New Browser Tab button in the IDE's main toolbar (its icon and tooltip), or clicks it
       // button <text>: clicks the selected browser tab's toolbar button with that text (e.g. "Device Width")
       case "button" -> {
@@ -392,12 +406,25 @@ public final class Commands {
           out.append("closed '").append(d.getTitle()).append("'\n");
         }
       }
-      // call <method>: runs a no-argument method of the selected browser tab (e.g. openFind), no keyboard focus needed
+      // call <method> [arg]: runs a method of the selected browser tab (e.g. openFind), no keyboard focus needed
       case "call" -> {
+        // call <method> [int | true | false]: also a method with one int or boolean argument (zoomStep 1, findAgain true)
         BrowserEditor ed = selectedBrowser();
-        java.lang.reflect.Method m = ed.getClass().getDeclaredMethod(arg);
-        m.setAccessible(true);
-        m.invoke(ed);
+        String[] a = arg.split(" ");
+        java.lang.reflect.Method m;
+        if (a.length == 1) {
+          m = ed.getClass().getDeclaredMethod(a[0]);
+          m.setAccessible(true);
+          m.invoke(ed);
+        } else if (a[1].equals("true") || a[1].equals("false")) {
+          m = ed.getClass().getDeclaredMethod(a[0], boolean.class);
+          m.setAccessible(true);
+          m.invoke(ed, Boolean.parseBoolean(a[1]));
+        } else {
+          m = ed.getClass().getDeclaredMethod(a[0], int.class);
+          m.setAccessible(true);
+          m.invoke(ed, Integer.parseInt(a[1]));
+        }
         out.append("called ").append(arg);
       }
       // popup [close | sizes | shot <file>]: the text of the selected browser tab's Share Preview popover, one label
@@ -546,6 +573,36 @@ public final class Commands {
         Field pending = Class.forName("nl.netonic.browser.ReloadOnSave").getDeclaredField("pending");
         pending.setAccessible(true);
         out.append(" pending ").append(pending.get(null));
+      }
+      // refresh <path>: refreshes a file from disk in the IDE's VFS, as it does on window activation / a file watcher
+      // event (a PDF changed on disk then reloads its tab)
+      case "refresh" -> {
+        VirtualFile f = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+            .refreshAndFindFileByNioFile(java.nio.file.Path.of(arg).toRealPath());
+        if (f == null) throw new IllegalArgumentException("no file " + arg);
+        com.intellij.openapi.vfs.VfsUtil.markDirtyAndRefresh(true, false, false, f);
+        out.append("refreshing ").append(f.getName());
+      }
+      // openpdf on|off: Settings › Tools › Editor Browser › Open PDF files in a browser tab
+      case "openpdf" -> {
+        nl.netonic.browser.BrowserStore.getInstance().setOpenPdfFiles(arg.equals("on"));
+        out.append("openPdfFiles ").append(nl.netonic.browser.BrowserStore.getInstance().isOpenPdfFiles());
+      }
+      // filetype <path>: the IDE's file type of a file from disk and the editors it would open it with
+      case "filetype" -> {
+        VirtualFile f = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+            .refreshAndFindFileByNioFile(java.nio.file.Path.of(arg).toRealPath());
+        if (f == null) throw new IllegalArgumentException("no file " + arg);
+        out.append("type ").append(f.getFileType().getName()).append(" binary=").append(f.getFileType().isBinary())
+            .append("\neditors");
+        for (com.intellij.openapi.fileEditor.FileEditorProvider prov : com.intellij.openapi.fileEditor.ex.FileEditorProviderManager
+            .getInstance().getProviderList(project(), f)) {
+          out.append(" ").append(prov.getEditorTypeId());
+        }
+        out.append("\nopen");
+        for (FileEditor ed : FileEditorManager.getInstance(project()).getAllEditors(f)) {
+          out.append(' ').append(ed.getClass().getSimpleName());
+        }
       }
       // focustab <title>: selects the open browser tab with that page title
       case "focustab" -> {

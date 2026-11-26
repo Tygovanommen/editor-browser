@@ -36,7 +36,8 @@ public final class BrowserFileSystem extends DeprecatedVirtualFileSystem {
   public @Nullable VirtualFile findFileByPath(@NotNull String path) {
     String id = path.replaceAll("^/+|/+$", "");
     // only tabs we know a URL for: a forgotten id would open an empty tab
-    return !id.isEmpty() && BrowserStore.getInstance().has(id) ? file(id) : null;
+    // (a PDF tab's id is in the store too, but its tab is the PDF file itself)
+    return !id.isEmpty() && !id.startsWith(PdfEditorProvider.ID_PREFIX) && BrowserStore.getInstance().has(id) ? file(id) : null;
   }
 
   @Override

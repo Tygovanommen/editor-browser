@@ -38,6 +38,8 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     public List<String> recent = new ArrayList<>();
     public boolean autoOpenDevServer = true;
     public boolean reloadOnSave = true;
+    /** Local PDF files open as a browser tab ({@link PdfEditorProvider}) rather than in the system's PDF app. */
+    public boolean openPdfFiles = true;
     /** {@link ToolbarLayout#toStored()}: item → place, only the items moved from their default place. */
     public Map<String, String> toolbar = new LinkedHashMap<>();
   }
@@ -145,6 +147,15 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     data.reloadOnSave = value;
   }
 
+  /** Whether local PDF files open as a browser tab, in Chromium's PDF viewer ({@link PdfEditorProvider}). */
+  public synchronized boolean isOpenPdfFiles() {
+    return data.openPdfFiles;
+  }
+
+  public synchronized void setOpenPdfFiles(boolean value) {
+    data.openPdfFiles = value;
+  }
+
   /** Where the optional toolbar items go (toolbar, ⋮ menu or hidden). */
   public synchronized ToolbarLayout toolbarLayout() {
     return toolbarLayout;
@@ -164,7 +175,7 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     if (hostPort == null) return null;
     String found = null;
     for (Map.Entry<String, String> entry : data.urls.entrySet()) {
-      if (hostPort.equals(Urls.hostPort(entry.getValue()))) found = entry.getKey();
+      if (isBrowserTab(entry.getKey()) && hostPort.equals(Urls.hostPort(entry.getValue()))) found = entry.getKey();
     }
     return found;
   }
@@ -178,9 +189,14 @@ public final class BrowserStore implements PersistentStateComponent<BrowserStore
     if (path == null) return null;
     String found = null;
     for (Map.Entry<String, String> entry : data.urls.entrySet()) {
-      if (path.equals(Urls.localPath(entry.getValue()))) found = entry.getKey();
+      if (isBrowserTab(entry.getKey()) && path.equals(Urls.localPath(entry.getValue()))) found = entry.getKey();
     }
     return found;
+  }
+
+  /** A {@link BrowserFile} tab, not a PDF file shown in a browser tab ({@link PdfEditorProvider}). */
+  private static boolean isBrowserTab(String id) {
+    return !id.startsWith(PdfEditorProvider.ID_PREFIX);
   }
 
   private void prune() {

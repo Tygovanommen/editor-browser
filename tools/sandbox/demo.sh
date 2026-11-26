@@ -174,6 +174,36 @@ EOF
 echo "document.title = 'EB Local';" > "$ROOT/project/web pages/page.js"
 echo "console.log('app');" > "$ROOT/project/app.js"
 echo "<?php echo 'hi';" > "$ROOT/project/index.php"
+# PDFs (Chromium's PDF viewer): doc.pdf has 3 pages with "EB needle" on each, doc-1page.pdf 1 page; in the project
+# (opened as a file) and on the site (as a link, and at /pdf without .pdf, see server.py)
+python3 -I - "$ROOT" <<'PY'
+import sys
+
+def pdf(path, pages):
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", None, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    kids = []
+    for i in range(pages):
+        text = f"BT /F1 24 Tf 72 700 Td (EB PDF page {i + 1} of {pages}: EB needle) Tj ET".encode()
+        objs.append(f"<< /Length {len(text)} >>\nstream\n{text.decode()}\nendstream")
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {len(objs)} 0 R "
+                    f"/Resources << /Font << /F1 3 0 R >> >> >>")
+        kids.append(f"{len(objs)} 0 R")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {pages} >>"
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for n, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{n} 0 obj\n{body}\nendobj\n".encode()
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += "".join(f"{o:010d} 00000 n \n" for o in offsets).encode()
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    open(path, "wb").write(out)
+
+root = sys.argv[1]
+pdf(f"{root}/project/doc.pdf", 3)
+pdf(f"{root}/project/doc-1page.pdf", 1)
+pdf(f"{root}/site/doc.pdf", 3)
+PY
 
 mkdir -p "$IDE/config/options" "$IDE/system" "$IDE/log"
 cp "$USER_CONFIG/phpstorm.key" "$IDE/config/" 2>/dev/null || echo "no phpstorm.key: PhpStorm will ask for a license"
